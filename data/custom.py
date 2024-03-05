@@ -5,7 +5,7 @@ from collections import OrderedDict
 import numpy as np
 from torch.utils.data import Dataset
 
-from ..models.utils.det_utils import eval_map, eval_recalls
+from models.utils.det_utils import eval_map, eval_recalls
 from .pipelines import Compose
 
 

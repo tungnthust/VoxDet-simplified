@@ -1,18 +1,7 @@
 import functools
 
 import torch.nn.functional as F
-from ..losses import CrossEntropyLoss, L1Loss, IoULoss
 
-def build_loss(cfg):
-    cfg_ = cfg.copy()
-
-    loss_type = cfg_.pop('type') 
-    if loss_type == 'L1Loss':
-        loss = L1Loss(**cfg_)
-    elif loss_type == 'IOULoss':
-        loss = IoULoss(**cfg_)
-    elif loss_type == 'CrossEntropyLoss':
-        loss = CrossEntropyLoss(**cfg_)
 def reduce_loss(loss, reduction):
     """Reduce loss as specified.
 

@@ -4,7 +4,7 @@ from ..utils.nn_utils import normal_init
 from ..utils.det_utils import multiclass_nms, anchor_inside_flags, images_to_levels, multi_apply, unmap
 
 from ..utils.rpn_utils import build_anchor_generator, build_assigner, build_bbox_coder, build_sampler
-from ..utils.loss_utils import build_loss
+from ..losses.builder import build_loss
 from .base_dense_head import BaseDenseHead
 from .dense_test_mixins import BBoxTestMixin
 

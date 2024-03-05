@@ -9,18 +9,18 @@ import torch
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
-from ..models.utils.det_utils import eval_recalls
+from models.utils.det_utils import eval_recalls
 from .custom import CustomDataset
 
-try:
-    import pycocotools
-    if not hasattr(pycocotools, '__sphinx_mock__'):  # for doc generation
-        assert pycocotools.__version__ >= '12.0.2'
-except AssertionError:
-    raise AssertionError('Incompatible version of pycocotools is installed. '
-                         'Run pip uninstall pycocotools first. Then run pip '
-                         'install mmpycocotools to install open-mmlab forked '
-                         'pycocotools.')
+# try:
+#     import pycocotools
+#     if not hasattr(pycocotools, '__sphinx_mock__'):  # for doc generation
+#         assert pycocotools.__version__ >= '12.0.2'
+# except AssertionError:
+#     raise AssertionError('Incompatible version of pycocotools is installed. '
+#                          'Run pip uninstall pycocotools first. Then run pip '
+#                          'install mmpycocotools to install open-mmlab forked '
+#                          'pycocotools.')
 
 
 class ZidDataset(CustomDataset):

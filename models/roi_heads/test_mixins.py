@@ -8,7 +8,7 @@ from ..utils.det_utils import bbox2roi, bbox_mapping, merge_aug_bboxes, merge_au
 logger = logging.getLogger(__name__)
 
 if sys.version_info >= (3, 7):
-    from mmdet.utils.contextmanagers import completed
+    from ..utils.ctx_manager import completed
 
 
 class BBoxTestMixin(object):

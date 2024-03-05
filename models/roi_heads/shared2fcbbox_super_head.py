@@ -6,7 +6,8 @@ from torch.nn.modules.utils import _pair
 from ..utils.nn_utils import ConvModule
 from ..utils.det_utils import multi_apply, multiclass_nms, bbox_overlaps
 from ..utils.rpn_utils import build_bbox_coder
-from ..utils.loss_utils import build_loss, accuracy
+from ..utils.loss_utils import accuracy
+from ..losses.builder import build_loss
 
 class BBoxHead(nn.Module):
     """Simplest RoI head, with only two fc layers for classification and

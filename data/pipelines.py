@@ -1,13 +1,11 @@
 import collections
 import os.path as osp
 import pycocotools.mask as maskUtils
-from ..models.utils.polygon_masks import BitmapMasks
-from ..models.utils.data_container import DataContainer as DC
+from models.utils.polygon_masks import BitmapMasks
+from models.utils.data_container import DataContainer as DC
 import torch
 from collections.abc import Sequence
 import warnings
-from .builder import build_transform
-
 
 class Compose(object):
     """Compose multiple transforms sequentially.
@@ -55,12 +53,12 @@ class Compose(object):
 
 import inspect
 
-from ..models.utils import imtransform
+from models.utils.image_utils import imtransform
 import numpy as np
 from numpy import random
 
-from ..models.utils.polygon_masks import PolygonMasks
-from ..models.utils.det_utils import bbox_overlaps
+from models.utils.polygon_masks import PolygonMasks
+from models.utils.det_utils import bbox_overlaps
 
 try:
     from imagecorruptions import corrupt
@@ -2430,3 +2428,23 @@ class CutOut(object):
                      else f'cutout_shape={self.candidates}, ')
         repr_str += f'fill_in={self.fill_in})'
         return repr_str
+
+transform_types = {
+    'LoadImageFromFile': LoadImageFromFile,
+    'LoadAnnotations': LoadAnnotations,
+    'Resize': Resize,
+    'RandomFlip': RandomFlip,
+    'Normalize': Normalize,
+    'Pad': Pad,
+    'DefaultFormatBundle': DefaultFormatBundle,
+    'Collect': Collect,
+    'MultiScaleFlipAug': MultiScaleFlipAug,
+    'ImageToTensor': ImagesToTensor
+}
+
+
+def build_transform(cfg):
+    cfg_ = cfg.copy()
+
+    transform_type = cfg_.pop('type') 
+    return transform_types[transform_type](**cfg_)

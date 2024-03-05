@@ -5,7 +5,7 @@ from ..utils.nn_utils import normal_init
 from ..utils.det_utils import bbox_overlaps, anchor_inside_flags, images_to_levels, multi_apply, unmap
 
 from ..utils.rpn_utils import build_assigner, build_sampler
-from ..utils.loss_utils import  build_loss
+from ..losses.builder import  build_loss
 from .rpn_head import RPNHead
 
 

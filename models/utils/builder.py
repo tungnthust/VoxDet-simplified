@@ -1,20 +1,8 @@
-from backbones.resnet import ResNet
-from necks.fpn import FPN
-from rpn_heads.oln_rpn_head import OlnRPNHead
-from roi_heads.zid_roi_head_3dgconvmix import ZidRoIHead3DGConvMix
-from detectors.zid_rcnn import ZidRCNN
+from ..backbones.resnet import ResNet
+from ..necks.fpn import FPN
+from ..roi_heads.zid_roi_head_3dgconvmix import ZidRoIHead3DGConvMix
+from ..rpn_heads.oln_rpn_head import OlnRPNHead
 
-def build_detector(model_cfg):
-    model_cfg_ = model_cfg.copy()
-
-    model_type = model_cfg_.pop('type') 
-    assert model_type == 'ZidRCNN', f'{model_type} is not implemented yet.'
-    return ZidRCNN(**model_cfg_)
-
-def build_dataset(data_cfg):
-    data_cfg_ = data_cfg.copy()
-
-    dataset_type = data_cfg_.pop('type') 
 def build_head_network(cfg):
     cfg_ = cfg.copy()
 
@@ -23,7 +11,7 @@ def build_head_network(cfg):
         return OlnRPNHead(**cfg_)
     elif head_type == 'ZidRoIHead3DGConvMix':
         return ZidRoIHead3DGConvMix(**cfg_)
-
+    
 def build_backbone(cfg):
     cfg_ = cfg.copy()
 

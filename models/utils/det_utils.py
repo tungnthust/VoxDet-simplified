@@ -5,7 +5,7 @@ import numpy as np
 from functools import partial
 from collections.abc import Sequence
 from terminaltables import AsciiTable
-
+from torchvision.ops import nms
 from multiprocessing import Pool
 from .class_names import get_classes
 
@@ -515,6 +515,47 @@ def bbox_mapping(bboxes,
     if flip:
         new_bboxes = bbox_flip(new_bboxes, img_shape, flip_direction)
     return new_bboxes
+
+def merge_aug_proposals(aug_proposals, img_metas, rpn_test_cfg):
+    """Merge augmented proposals (multiscale, flip, etc.)
+
+    Args:
+        aug_proposals (list[Tensor]): proposals from different testing
+            schemes, shape (n, 5). Note that they are not rescaled to the
+            original image size.
+
+        img_metas (list[dict]): list of image info dict where each dict has:
+            'img_shape', 'scale_factor', 'flip', and may also contain
+            'filename', 'ori_shape', 'pad_shape', and 'img_norm_cfg'.
+            For details on the values of these keys see
+            `mmdet/datasets/pipelines/formatting.py:Collect`.
+
+        rpn_test_cfg (dict): rpn test config.
+
+    Returns:
+        Tensor: shape (n, 4), proposals corresponding to original image scale.
+    """
+    recovered_proposals = []
+    for proposals, img_info in zip(aug_proposals, img_metas):
+        img_shape = img_info['img_shape']
+        scale_factor = img_info['scale_factor']
+        flip = img_info['flip']
+        flip_direction = img_info['flip_direction']
+        _proposals = proposals.clone()
+        _proposals[:, :4] = bbox_mapping_back(_proposals[:, :4], img_shape,
+                                              scale_factor, flip,
+                                              flip_direction)
+        recovered_proposals.append(_proposals)
+    aug_proposals = torch.cat(recovered_proposals, dim=0)
+    merged_proposals, _ = nms(aug_proposals[:, :4].contiguous(),
+                              aug_proposals[:, -1].contiguous(),
+                              rpn_test_cfg.nms_thr)
+    scores = merged_proposals[:, 4]
+    _, order = scores.sort(0, descending=True)
+    num = min(rpn_test_cfg.max_num, merged_proposals.shape[0])
+    order = order[:num]
+    merged_proposals = merged_proposals[order, :]
+    return merged_proposals
 
 def merge_aug_masks(aug_masks, img_metas, rcnn_test_cfg, weights=None):
     """Merge augmented mask prediction.

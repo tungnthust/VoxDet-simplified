@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 
 import cv2
-import imtransform
+from .image_utils import imtransform
 import numpy as np
 import pycocotools.mask as maskUtils
 import torch
