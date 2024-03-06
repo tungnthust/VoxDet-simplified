@@ -65,12 +65,12 @@ try:
 except ImportError:
     corrupt = None
 
-try:
-    import albumentations
-    from albumentations import Compose
-except ImportError:
-    albumentations = None
-    Compose = None
+# try:
+#     import albumentations
+#     from albumentations import Compose
+# except ImportError:
+#     albumentations = None
+#     Compose = None
 
 class LoadImageFromFile(object):
     """Load an image from file.

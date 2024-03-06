@@ -172,7 +172,7 @@ class ZidDataset(CustomDataset):
         if self.proposals is not None:
             results['proposals'] = self.proposals[idx]
         self.pre_pipeline(results)
-        data = self.pipeline(image=results)["image"]
+        data = self.pipeline(results)
         p1_data = np.load(os.path.join(self.p1_path, str(img_info['obj_id']), 'info.npz'))
         data['rgb'] = torch.from_numpy(p1_data['rgb'].astype(np.float32))
         data['mask'] = torch.from_numpy(p1_data['mask'].astype(np.float32))
