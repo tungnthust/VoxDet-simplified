@@ -7,10 +7,8 @@ def build_loss(cfg):
 
     loss_type = cfg_.pop('type') 
     if loss_type == 'L1Loss':
-        loss = L1Loss(**cfg_)
+        return L1Loss(**cfg_)
     elif loss_type == 'IOULoss':
-        loss = IoULoss(**cfg_)
+        return IoULoss(**cfg_)
     elif loss_type == 'CrossEntropyLoss':
-        loss = CrossEntropyLoss(**cfg_)
-    
-    return loss
+        return CrossEntropyLoss(**cfg_)

@@ -1,10 +1,11 @@
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union, List
 from torch.nn import Conv2d, BatchNorm2d
 import torch.nn as nn
 import torch
 import io
 import blobfile as bf
-
+from torchvision.models import resnet50
+from collections import OrderedDict
 
 def constant_init(module: nn.Module, val: float, bias: float = 0) -> None:
     if hasattr(module, 'weight') and module.weight is not None:
@@ -56,13 +57,14 @@ def build_conv_layer(
             inchannels,
             outchannels,
             kernel_size,
-            stride,
+            stride=1,
             padding=0,
             dilation=1,
+            groups=1,
             bias=False):
-    return Conv2d(inchannels, outchannels, kernel_size, stride=stride, padding=padding, dilation=dilation, bias=bias)
+    return Conv2d(inchannels, outchannels, kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
     
-def build_norm_layer(cfg, num_features, postfix):
+def build_norm_layer(cfg, num_features, postfix=''):
     cfg_ = cfg.copy()
 
     layer_type = cfg_.pop('type')
@@ -130,6 +132,78 @@ def load_state_dict(path, **kwargs):
 
     return torch.load(io.BytesIO(data), **kwargs)
 
+def _load_state_dict(module: nn.Module,
+                    state_dict: Union[dict, OrderedDict],
+                    strict: bool = False,
+                    ) -> None:
+    """Load state_dict to a module.
+
+    This method is modified from :meth:`torch.nn.Module.load_state_dict`.
+    Default value for ``strict`` is set to ``False`` and the message for
+    param mismatch will be shown even if strict is False.
+
+    Args:
+        module (Module): Module that receives the state_dict.
+        state_dict (dict or OrderedDict): Weights.
+        strict (bool): whether to strictly enforce that the keys
+            in :attr:`state_dict` match the keys returned by this module's
+            :meth:`~torch.nn.Module.state_dict` function. Default: ``False``.
+        logger (:obj:`logging.Logger`, optional): Logger to log the error
+            message. If not specified, print function will be used.
+    """
+    unexpected_keys: List[str] = []
+    all_missing_keys: List[str] = []
+    err_msg: List[str] = []
+
+    metadata = getattr(state_dict, '_metadata', None)
+    state_dict = state_dict.copy()  # type: ignore
+    if metadata is not None:
+        state_dict._metadata = metadata  # type: ignore
+
+    # use _load_from_state_dict to enable checkpoint version control
+    def load(module, prefix=''):
+        # recursively check parallel module in case that the model has a
+        # complicated structure, e.g., nn.Module(nn.Module(DDP))
+        # if is_module_wrapper(module):
+        #     module = module.module
+        local_metadata = {} if metadata is None else metadata.get(
+            prefix[:-1], {})
+        module._load_from_state_dict(state_dict, prefix, local_metadata, True,
+                                     all_missing_keys, unexpected_keys,
+                                     err_msg)
+        for name, child in module._modules.items():
+            if child is not None:
+                load(child, prefix + name + '.')
+
+    load(module)
+    # break load->load reference cycle
+    load = None  # type: ignore
+
+    # ignore "num_batches_tracked" of BN layers
+    missing_keys = [
+        key for key in all_missing_keys if 'num_batches_tracked' not in key
+    ]
+
+    if unexpected_keys:
+        err_msg.append('unexpected key in source '
+                       f'state_dict: {", ".join(unexpected_keys)}\n')
+    if missing_keys:
+        err_msg.append(
+            f'missing keys in source state_dict: {", ".join(missing_keys)}\n')
+
+    # rank, _ = get_dist_info()
+    # if len(err_msg) > 0 and rank == 0:
+    #     err_msg.insert(
+    #         0, 'The model and loaded state dict do not match exactly\n')
+    #     err_msg = '\n'.join(err_msg)  # type: ignore
+    #     if strict:
+    #         raise RuntimeError(err_msg)
+    #     elif logger is not None:
+    #         logger.warning(err_msg)
+    #     else:
+    #         print(err_msg)
+
+
 def load_checkpoint(
         model,
         filename):
@@ -152,7 +226,12 @@ def load_checkpoint(
     Returns:
         dict or OrderedDict: The loaded checkpoint.
     """
-    model.load_state_dict(load_state_dict(filename))
+    if 'resnet50' in filename:
+        resnet50_pretrained = resnet50(weights='IMAGENET1K_V1')
+        _load_state_dict(model, resnet50_pretrained.state_dict())
+        # model.load_state_dict(resnet50_pretrained.state_dict())
+    else:
+        model.load_state_dict(load_state_dict(filename))
 
 class ConvModule(nn.Module):
     """A conv block that bundles conv/norm/activation layers.

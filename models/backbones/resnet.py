@@ -6,7 +6,6 @@ from torch.nn.modules.batchnorm import _BatchNorm
 from .res_layer import ResLayer
 
 
-
 class BasicBlock(nn.Module):
     expansion = 1
 

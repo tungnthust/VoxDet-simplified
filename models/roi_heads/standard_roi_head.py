@@ -15,9 +15,9 @@ class StandardRoIHead(BaseRoIHead, BBoxTestMixin, MaskTestMixin):
         self.bbox_assigner = None
         self.bbox_sampler = None
         if self.train_cfg:
-            self.bbox_assigner = build_assigner(self.train_cfg.assigner)
+            self.bbox_assigner = build_assigner(self.train_cfg['assigner'])
             self.bbox_sampler = build_sampler(
-                self.train_cfg.sampler, context=self)
+                self.train_cfg['sampler'])
 
     def init_bbox_head(self, bbox_roi_extractor, bbox_head):
         """Initialize ``bbox_head``"""

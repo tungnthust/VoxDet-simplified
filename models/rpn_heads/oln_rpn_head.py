@@ -35,14 +35,14 @@ class OlnRPNHead(RPNHead):
         # Define objectness assigner and sampler
         if self.train_cfg:
             self.objectness_assigner = build_assigner(
-                self.train_cfg.objectness_assigner)
+                self.train_cfg['objectness_assigner'])
             # use PseudoSampler when sampling is False
             if self.sampling and hasattr(self.train_cfg, 'objectness_sampler'):
-                objectness_sampler_cfg = self.train_cfg.objectness_sampler
+                objectness_sampler_cfg = self.train_cfg['objectness_sampler']
             else:
                 objectness_sampler_cfg = dict(type='PseudoSampler')
             self.objectness_sampler = build_sampler(
-                objectness_sampler_cfg, context=self)
+                objectness_sampler_cfg)
 
     def _init_layers(self):
         """Initialize layers of the head."""

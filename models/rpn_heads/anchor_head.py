@@ -77,13 +77,13 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
         if self.train_cfg:
-            self.assigner = build_assigner(self.train_cfg.assigner)
+            self.assigner = build_assigner(self.train_cfg['assigner'])
             # use PseudoSampler when sampling is False
             if self.sampling and hasattr(self.train_cfg, 'sampler'):
                 sampler_cfg = self.train_cfg.sampler
             else:
                 sampler_cfg = dict(type='PseudoSampler')
-            self.sampler = build_sampler(sampler_cfg, context=self)
+            self.sampler = build_sampler(sampler_cfg)
         self.fp16_enabled = False
 
         self.anchor_generator = build_anchor_generator(anchor_generator)

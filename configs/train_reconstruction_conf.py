@@ -172,7 +172,7 @@ model = dict(
 
 # Dataset
 dataset_type = 'ReconZidDataset'
-data_root = 'data/OWID/'
+data_root = '/home/minhnh/project_drive/CV/FewshotObjectDetection/data/OWID/'
 data = dict(
     samples_per_gpu=8,
     workers_per_gpu=8,
