@@ -6,8 +6,7 @@ from collections import OrderedDict
 import os
 import numpy as np
 import torch
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
+from .coco_api import COCO, COCOeval
 
 from models.utils.det_utils import eval_recalls
 from .custom import CustomDataset
