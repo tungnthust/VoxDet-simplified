@@ -50,6 +50,7 @@ class TrainLoop:
         
         self.batch_size = batch_size
         self.lr = lr
+        self.cur_lr = self.lr
         self.ema_rate = (
             [ema_rate]
             if isinstance(ema_rate, float)
@@ -70,6 +71,7 @@ class TrainLoop:
         self.num_workers = num_workers
         self.world_size = world_size
         self.step = 0
+        self.step_lr_update = [6,7]
         self.resume_step = 0
         self.global_batch = self.batch_size * dist.get_world_size()
         self.w = None
@@ -224,12 +226,15 @@ class TrainLoop:
                         batch[k][i] = batch[k][i].to(self.device, non_blocking=True)
                 elif k in ['rgb', 'mask', 'traj', 'query_pose']:
                     batch[k] = batch[k].data.to(self.device, non_blocking=True)
-                
+        if self.step < self.warmup_iters:
+            self._warmup_lr() 
+        else:
+            self._update_lr()
         self.forward_backward(batch)
         took_step = self.mp_trainer.optimize(self.opt)
         if took_step:
             self._update_ema()
-        self._anneal_lr()
+        # self._anneal_lr()
         if self.rank == 0:
             self.log_step()
 
@@ -254,6 +259,18 @@ class TrainLoop:
         for rate, params in zip(self.ema_rate, self.ema_params):
             update_ema(params, self.mp_trainer.master_params, rate=rate)
 
+    def _update_lr(self):
+        progress = self.epoch
+        for i, s in enumerate(self.step_lr_update):
+            if progress < s:
+                exp = i
+                break
+
+        lr = self.base_lr * (0.1**exp)
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = lr
+        self.cur_lr = lr
+
     def _anneal_lr(self):
         if not self.lr_anneal_steps:
             return
@@ -261,14 +278,17 @@ class TrainLoop:
         lr = self.lr * (1 - frac_done)
         for param_group in self.opt.param_groups:
             param_group["lr"] = lr
-            
+        self.cur_lr = lr
+
     def _warmup_lr(self):
         k = (1 - self.step / self.warmup_iters) * (1 - self.warmup_ratio)
         warmup_lr = self.base_lr * (1 - k)
         for param_group in self.opt.param_groups:
             param_group["lr"] = warmup_lr
+        self.cur_lr = warmup_lr
 
     def log_step(self):
+        logger.logkv("lr", self.cur_lr)
         logger.logkv("epoch", self.epoch + 1)
         logger.logkv("step", self.step + self.resume_step)
         logger.logkv("samples", (self.step + self.resume_step + 1) * self.global_batch)
