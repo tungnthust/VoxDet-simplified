@@ -6,6 +6,7 @@ from models.utils.data_container import DataContainer as DC
 import torch
 from collections.abc import Sequence
 import warnings
+import albumentations
 
 class Compose(object):
     """Compose multiple transforms sequentially.

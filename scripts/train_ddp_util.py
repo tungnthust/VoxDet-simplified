@@ -73,6 +73,8 @@ class TrainLoop:
         self.resume_step = 0
         self.global_batch = self.batch_size * dist.get_world_size()
         self.w = None
+        self.warmup_iters = 500
+        self.warmup_ratio = 0.001
         self.train_sampler = th.utils.data.distributed.DistributedSampler(data,
                                                                     num_replicas=self.world_size,
                                                                     rank=self.rank)
@@ -111,7 +113,7 @@ class TrainLoop:
             )
         elif optimizer['type'] == 'Sergery':
             self.opt = build_optimizer_serge_recon(self.mp_trainer.model, optimizer)
-                                                  
+            self.base_lr = optimizer['lr']                                       
         
                                                    
         if self.resume_step:
@@ -259,6 +261,12 @@ class TrainLoop:
         lr = self.lr * (1 - frac_done)
         for param_group in self.opt.param_groups:
             param_group["lr"] = lr
+            
+    def _warmup_lr(self):
+        k = (1 - self.step / self.warmup_iters) * (1 - self.warmup_ratio)
+        warmup_lr = self.base_lr * (1 - k)
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = warmup_lr
 
     def log_step(self):
         logger.logkv("epoch", self.epoch + 1)
