@@ -1,111 +1,3 @@
-dataset_type = 'ZidDataset'
-data_root = '/home/minhnh/project_drive/CV/FewshotObjectDetection/data/OWID/'
-img_norm_cfg = dict(
-    mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
-train_pipeline = [
-    dict(type='LoadImageFromFile'),
-    dict(type='LoadAnnotations', with_bbox=True),
-    dict(type='Resize', img_scale=(1333, 800), keep_ratio=True),
-    dict(type='RandomFlip', flip_ratio=0.5),
-    dict(
-        type='Normalize',
-        mean=[123.675, 116.28, 103.53],
-        std=[58.395, 57.12, 57.375],
-        to_rgb=True),
-    dict(type='Pad', size_divisor=32),
-    dict(type='DefaultFormatBundle'),
-    dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels'])
-]
-test_pipeline = [
-    dict(type='LoadImageFromFile'),
-    dict(
-        type='MultiScaleFlipAug',
-        img_scale=(1333, 800),
-        flip=False,
-        transforms=[
-            dict(type='Resize', keep_ratio=True),
-            dict(type='RandomFlip'),
-            dict(
-                type='Normalize',
-                mean=[123.675, 116.28, 103.53],
-                std=[58.395, 57.12, 57.375],
-                to_rgb=True),
-            dict(type='Pad', size_divisor=32),
-            dict(type='ImageToTensor', keys=['img']),
-            dict(type='Collect', keys=['img'])
-        ])
-]
-data = dict(
-    samples_per_gpu=8,
-    workers_per_gpu=8,
-    train=dict(
-        type='ZidDataset',
-        p1_path='data/OWID/P1/',
-        ann_file='data/OWID/P2/train_annotations.json',
-        img_prefix='data/OWID//P2/',
-        pipeline=[
-            dict(type='LoadImageFromFile'),
-            dict(type='LoadAnnotations', with_bbox=True),
-            dict(type='Resize', img_scale=(1333, 800), keep_ratio=True),
-            dict(type='RandomFlip', flip_ratio=0.5),
-            dict(
-                type='Normalize',
-                mean=[123.675, 116.28, 103.53],
-                std=[58.395, 57.12, 57.375],
-                to_rgb=True),
-            dict(type='Pad', size_divisor=32),
-            dict(type='DefaultFormatBundle'),
-            dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels'])
-        ],
-        img_scale=55000,
-        ins_scale=180000),
-    val=dict(
-        type='ZidDataset',
-        p1_path='data/OWID/P1/',
-        ann_file='data/OWID/P2/val_annotations_ins.json',
-        img_prefix='data/OWID//P2/',
-        pipeline=[
-            dict(type='LoadImageFromFile'),
-            dict(
-                type='MultiScaleFlipAug',
-                img_scale=(1333, 800),
-                flip=False,
-                transforms=[
-                    dict(type='Resize', keep_ratio=True),
-                    dict(type='RandomFlip'),
-                    dict(
-                        type='Normalize',
-                        mean=[123.675, 116.28, 103.53],
-                        std=[58.395, 57.12, 57.375],
-                        to_rgb=True),
-                    dict(type='Pad', size_divisor=32),
-                    dict(type='ImageToTensor', keys=['img']),
-                    dict(type='Collect', keys=['img'])
-                ])
-        ],
-        img_scale=500,
-        ins_scale=500))
-evaluation = dict(interval=1, metric='bbox')
-optimizer = dict(
-    type='Sergery', lr=0.02, momentum=0.9, weight_decay=0.0001, fix_voxel=0.1)
-optimizer_config = dict(grad_clip=None)
-lr_config = dict(
-    policy='step',
-    warmup='linear',
-    warmup_iters=500,
-    warmup_ratio=0.001,
-    step=[6, 7])
-total_epochs = 10
-checkpoint_config = dict(interval=1)
-log_config = dict(
-    interval=10,
-    hooks=[dict(type='TextLoggerHook'),
-           dict(type='TensorboardLoggerHook')])
-dist_params = dict(backend='nccl')
-log_level = 'INFO'
-load_from = None
-resume_from = '/home/minhnh/project_drive/CV/FewshotObjectDetection/VoxDet-simplified/results/recon_ckpt/model_ep16_004800.pt'
-workflow = [('train', 1)]
 model = dict(
     type='ZidRCNN',
     pretrained='torchvision://resnet50',
@@ -131,16 +23,20 @@ model = dict(
         feat_channels=256,
         anchor_generator=dict(
             type='AnchorGenerator',
+            # Use a single anchor per location.
             scales=[8],
             ratios=[1.0],
             strides=[4, 8, 16, 32, 64]),
-        bbox_coder=dict(type='TBLRBBoxCoder', normalizer=1.0),
+        bbox_coder=dict(
+            type='TBLRBBoxCoder',
+            normalizer=1.0,),
         loss_cls=dict(
             type='CrossEntropyLoss', use_sigmoid=True, loss_weight=0.0),
         reg_decoded_bbox=True,
         loss_bbox=dict(type='IoULoss', linear=True, loss_weight=10.0),
         objectness_type='Centerness',
-        loss_objectness=dict(type='L1Loss', loss_weight=1.0)),
+        loss_objectness=dict(type='L1Loss', loss_weight=1.0),
+        ),
     roi_head=dict(
         type='ZidRoIHead3DGConvMix',
         support_guidance=dict(
@@ -159,23 +55,34 @@ model = dict(
             type='Shared2FCBBoxSuperHead',
             neg_head=True,
             contrastive=dict(
-                test_topk=10, avg_conrta=True, bg_conrta=False, num_conrta=10),
+                test_topk=10,
+                avg_conrta=True,
+                bg_conrta=False,
+                num_conrta=10),
             in_channels=256,
             fc_out_channels=1024,
             roi_feat_size=7,
             num_classes=1,
             bbox_coder=dict(
                 type='DeltaXYWHBBoxCoder',
-                target_means=[0.0, 0.0, 0.0, 0.0],
+                target_means=[0., 0., 0., 0.],
                 target_stds=[0.1, 0.1, 0.2, 0.2]),
             reg_class_agnostic=False,
             loss_cls=dict(
-                type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0),
+                type='CrossEntropyLoss', 
+                use_sigmoid=False, 
+                loss_weight=1.0,
+                ),
             loss_bbox=dict(type='L1Loss', loss_weight=1.0),
-            bbox_score_type='BoxIoU',
+            bbox_score_type='BoxIoU',  # 'BoxIoU' or 'Centerness'
             loss_bbox_score=dict(type='L1Loss', loss_weight=1.0),
             loss_contra=dict(
-                type='CrossEntropyLoss', use_sigmoid=False, loss_weight=0.0))),
+                type='CrossEntropyLoss', 
+                use_sigmoid=False, 
+                loss_weight=0.0,
+                ),
+            )),
+    # model training and testing settings
     train_cfg=dict(
         rpn=dict(
             assigner=dict(
@@ -190,6 +97,7 @@ model = dict(
                 pos_fraction=0.5,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=False),
+            # Objectness assigner and sampler 
             objectness_assigner=dict(
                 type='MaxIoUAssigner',
                 pos_iou_thr=0.3,
@@ -199,7 +107,8 @@ model = dict(
             objectness_sampler=dict(
                 type='RandomSampler',
                 num=256,
-                pos_fraction=1.0,
+                # Ratio 0 for negative samples.
+                pos_fraction=1.,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=False),
             allowed_border=0,
@@ -221,7 +130,7 @@ model = dict(
                 match_low_quality=False,
                 ignore_iof_thr=-1),
             sampler=dict(
-                type='InstanceSampler',
+                type='InstanceSampler', # make sure gt is always input for ROI head
                 num=256,
                 pos_fraction=0.25,
                 neg_pos_ub=-1,
@@ -234,12 +143,96 @@ model = dict(
             nms_pre=2000,
             nms_post=2000,
             max_num=2000,
-            nms_thr=0.0,
+            nms_thr=0.0,  # No nms
             min_bbox_size=0),
         rcnn=dict(
             score_thr=0.0,
             nms=dict(type='nms', iou_threshold=0.7),
-            max_per_img=1500)))
+            # max_per_img should be greater enough than k of AR@k evaluation
+            # because the cross-dataset AR evaluation does not count those
+            # proposals on the 'seen' classes into the budget (k), to avoid
+            # evaluating recall on seen-class objects. It's recommended to use
+            # max_per_img=1500 or 2000 when evaluating upto AR@1000.
+            max_per_img=1500,
+            )
+    ))
+
+# Dataset
+dataset_type = 'ZidDataset'
+data_root = '/home/minhnh/project_drive/CV/FewshotObjectDetection/data/OWID/'
+img_norm_cfg = dict(
+    mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
+train_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(type='LoadAnnotations', with_bbox=True),
+    dict(type='Resize', img_scale=(1333, 800), keep_ratio=True),
+    dict(type='RandomFlip', flip_ratio=0.5),
+    dict(type='Normalize', **img_norm_cfg),
+    dict(type='Pad', size_divisor=32),
+    dict(type='DefaultFormatBundle'),
+    dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels']),
+]
+test_pipeline = [
+    dict(type='LoadImageFromFile'),
+    dict(
+        type='MultiScaleFlipAug',
+        img_scale=(1333, 800),
+        flip=False,
+        transforms=[
+            dict(type='Resize', keep_ratio=True),
+            dict(type='RandomFlip'),
+            dict(type='Normalize', **img_norm_cfg),
+            dict(type='Pad', size_divisor=32),
+            dict(type='ImageToTensor', keys=['img']),
+            dict(type='Collect', keys=['img']),
+        ])
+]
+data = dict(
+    samples_per_gpu=8,
+    workers_per_gpu=8,
+    train=dict(
+        type=dataset_type,
+        img_scale=55000,
+        ins_scale=180000,
+        p1_path=data_root + 'P1/',
+        ann_file=data_root + 'P2/train_annotations.json',
+        img_prefix=data_root + '/P2/',
+        pipeline=train_pipeline),
+    val=dict(
+        type=dataset_type,
+        img_scale=500,
+        ins_scale=500,
+        p1_path=data_root + 'P1/',
+        ann_file=data_root + 'P2/val_annotations_ins.json',
+        img_prefix=data_root + '/P2/',
+        pipeline=test_pipeline))
+
+lr_config = dict(
+    policy='step',
+    warmup='linear',
+    warmup_iters=500,
+    warmup_ratio=0.001,
+    step=[6, 7])
+total_epochs = 10
+# optimizer
+optimizer = dict(type='Sergery', lr=0.02, momentum=0.9, weight_decay=0.0001, fix_voxel=0.1)
+optimizer_config = dict(grad_clip=None)
+
+checkpoint_config = dict(interval=1)
+# yapf:disable
+log_config = dict(
+    interval=10,
+    hooks=[
+        dict(type='TextLoggerHook'),
+        dict(type='TensorboardLoggerHook')
+    ])
+# yapf:enable
+dist_params = dict(backend='nccl')
+log_level = 'INFO'
+load_from = None
 resume_layers = ['relate_3d']
-work_dir = 'outputs/VoxDet_p2_1'
-gpu_ids = range(0, 4)
+resume_from = '/home/minhnh/project_drive/CV/FewshotObjectDetection/VoxDet-simplified/results/recon_ckpt/model_ep16_004800.pt'
+resume_checkpoint = None
+workflow = [('train', 1)]
+
+work_dir='outputs/VoxDet_p2_1'
