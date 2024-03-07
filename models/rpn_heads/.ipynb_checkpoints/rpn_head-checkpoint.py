@@ -127,12 +127,12 @@ class RPNHead(RPNTestMixin, AnchorHead):
                 scores = rpn_cls_score.softmax(dim=1)[:, 0]
             rpn_bbox_pred = rpn_bbox_pred.permute(1, 2, 0).reshape(-1, 4)
             anchors = mlvl_anchors[idx]
-            if cfg['nms_pre'] > 0 and scores.shape[0] > cfg['nms_pre']:
+            if cfg.nms_pre > 0 and scores.shape[0] > cfg.nms_pre:
                 # sort is faster than topk
                 # _, topk_inds = scores.topk(cfg.nms_pre)
                 ranked_scores, rank_inds = scores.sort(descending=True)
-                topk_inds = rank_inds[:cfg['nms_pre']]
-                scores = ranked_scores[:cfg['nms_pre']]
+                topk_inds = rank_inds[:cfg.nms_pre]
+                scores = ranked_scores[:cfg.nms_pre]
                 rpn_bbox_pred = rpn_bbox_pred[topk_inds, :]
                 anchors = anchors[topk_inds, :]
             mlvl_scores.append(scores)
@@ -148,12 +148,12 @@ class RPNHead(RPNTestMixin, AnchorHead):
             anchors, rpn_bbox_pred, max_shape=img_shape)
         ids = torch.cat(level_ids)
 
-        if cfg['min_bbox_size'] > 0:
+        if cfg.min_bbox_size > 0:
             w = proposals[:, 2] - proposals[:, 0]
             h = proposals[:, 3] - proposals[:, 1]
             valid_inds = torch.nonzero(
-                (w >= cfg['min_bbox_size'])
-                & (h >= cfg['min_bbox_size']),
+                (w >= cfg.min_bbox_size)
+                & (h >= cfg.min_bbox_size),
                 as_tuple=False).squeeze()
             if valid_inds.sum().item() != len(proposals):
                 proposals = proposals[valid_inds, :]
@@ -161,6 +161,6 @@ class RPNHead(RPNTestMixin, AnchorHead):
                 ids = ids[valid_inds]
 
         # TODO: remove the hard coded nms type
-        nms_cfg = dict(type='nms', iou_threshold=cfg['nms_thr'])
+        nms_cfg = dict(type='nms', iou_threshold=cfg.nms_thr)
         dets, keep = batched_nms(proposals, scores, ids, nms_cfg)
-        return dets[:cfg['nms_post']]
+        return dets[:cfg.nms_post]
