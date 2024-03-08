@@ -1,8 +1,15 @@
+_base_ = [
+    '../_base_/datasets/bop_detection.py',
+    '../_base_/schedules/schedule_1x.py', 
+    '../_base_/default_runtime.py'
+]
+# model settings
 model = dict(
     type='ZidRCNN',
     pretrained='torchvision://resnet50',
     neg_rpn=False,
     mode='det',
+    D=16, #default is 16, for lmo and ycbv
     backbone=dict(
         type='ResNet',
         depth=50,
@@ -39,6 +46,7 @@ model = dict(
         ),
     roi_head=dict(
         type='ZidRoIHead3DGConvMix',
+        save_p1=True,
         support_guidance=dict(
             in_channel3d=32,
             hidden_3d=32,
@@ -79,7 +87,7 @@ model = dict(
             loss_contra=dict(
                 type='CrossEntropyLoss', 
                 use_sigmoid=False, 
-                loss_weight=0.0,
+                loss_weight=0.5,
                 ),
             )),
     # model training and testing settings
@@ -130,8 +138,8 @@ model = dict(
                 match_low_quality=False,
                 ignore_iof_thr=-1),
             sampler=dict(
-                type='InstanceSampler', # make sure gt is always input for ROI head
-                num=256,
+                type='RandomSampler',
+                num=512,
                 pos_fraction=0.25,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=True),
@@ -158,8 +166,9 @@ model = dict(
     ))
 
 # Dataset
-dataset_type = 'ZidDataset'
+dataset_type = 'BopDataset'
 data_root = '/home/minhnh/project_drive/CV/FewshotObjectDetection/data/OWID/'
+dataset = 'RoboTools' # 'lmo' 'ycbv'
 img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 train_pipeline = [
@@ -188,23 +197,13 @@ test_pipeline = [
         ])
 ]
 data = dict(
-    samples_per_gpu=8,
-    workers_per_gpu=8,
-    train=dict(
+    samples_per_gpu=1,
+    workers_per_gpu=2,
+    test=dict(
         type=dataset_type,
-        img_scale=55000,
-        ins_scale=180000,
-        p1_path=data_root + 'P1/',
-        ann_file=data_root + 'P2/train_annotations.json',
-        img_prefix=data_root + '/P2/',
-        pipeline=train_pipeline),
-    val=dict(
-        type=dataset_type,
-        img_scale=500,
-        ins_scale=500,
-        p1_path=data_root + 'P1/',
-        ann_file=data_root + 'P2/val_annotations_ins.json',
-        img_prefix=data_root + '/P2/',
+        p1_path=data_root + dataset + '/test_video/',
+        ann_file=data_root + dataset + '/test/scene_gt_coco_all.json',
+        img_prefix=data_root + dataset + '/test',
         pipeline=test_pipeline))
 
 lr_config = dict(
@@ -213,12 +212,9 @@ lr_config = dict(
     warmup_iters=500,
     warmup_ratio=0.001,
     step=[6, 7])
-total_epochs = 10
-# optimizer
-optimizer = dict(type='Sergery', lr=0.02, momentum=0.9, weight_decay=0.0001, fix_voxel=0.1)
-optimizer_config = dict(grad_clip=None)
+total_epochs = 8
 
-checkpoint_config = dict(interval=1)
+checkpoint_config = dict(interval=2)
 # yapf:disable
 log_config = dict(
     interval=10,
@@ -230,9 +226,7 @@ log_config = dict(
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 load_from = None
-resume_layers = ['relate_3d']
-resume_from = '/home/minhnh/project_drive/CV/FewshotObjectDetection/outputs/VoxDet_p1/iter_19201.pth'
-resume_checkpoint = None
+resume_from = None
 workflow = [('train', 1)]
 
-work_dir='outputs/VoxDet_p2_1'
+work_dir=''

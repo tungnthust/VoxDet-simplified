@@ -1,9 +1,11 @@
 from .zid import ZidDataset
 from .reconzid import ReconZidDataset
+from .bop import BopDataset
 
 dataset_types = {
     'ZidDataset': ZidDataset,
-    'ReconZidDataset': ReconZidDataset
+    'ReconZidDataset': ReconZidDataset,
+    'BOPDataset': BopDataset
 }
 
 def build_dataset(data_cfg):
