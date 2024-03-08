@@ -5,7 +5,7 @@ from .bop import BopDataset
 dataset_types = {
     'ZidDataset': ZidDataset,
     'ReconZidDataset': ReconZidDataset,
-    'BOPDataset': BopDataset
+    'BopDataset': BopDataset
 }
 
 def build_dataset(data_cfg):
