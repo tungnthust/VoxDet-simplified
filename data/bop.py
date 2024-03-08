@@ -23,9 +23,6 @@ from pycocotools.cocoeval import COCOeval
 
 from terminaltables import AsciiTable
 
-
-from .builder import DATASETS
-
 from .custom import CustomDataset
 
 try:
@@ -50,7 +47,6 @@ ROBO_CLASSES = ('1', '2', '3', '4', '5',
             '20')
 MAX_DET = 1
 
-@DATASETS.register_module()
 class BopDataset(CustomDataset):
 
     def __init__(self,
