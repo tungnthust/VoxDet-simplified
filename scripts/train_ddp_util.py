@@ -261,6 +261,7 @@ class TrainLoop:
 
     def _update_lr(self):
         progress = self.epoch
+        exp = len(self.step_lr_update)
         for i, s in enumerate(self.step_lr_update):
             if progress < s:
                 exp = i
