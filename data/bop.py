@@ -18,9 +18,7 @@ from glob import glob
 
 import numpy as np
 # from mmcv.utils import print_log
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
-
+from .coco_api import COCO, COCOeval
 from terminaltables import AsciiTable
 
 from .custom import CustomDataset
@@ -77,7 +75,8 @@ class BopDataset(CustomDataset):
                     self.cam_pos[obj_id] = json.load(f)
             with open (all_cam_path, 'w') as f:
                 json.dump(self.cam_pos, f)
-        dataset_name = kwargs['ann_file'].split('/')[2]
+        dataset_name = kwargs['ann_file'].split('/')[-3]
+        # print(kwargs['ann_file'])
         self.CLASSES = object_names[dataset_name]
         super(BopDataset, self).__init__(classes = self.CLASSES, **kwargs)
 

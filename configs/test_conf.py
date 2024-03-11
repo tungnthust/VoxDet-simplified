@@ -162,7 +162,7 @@ model = dict(
 
 # Dataset
 dataset_type = 'BopDataset'
-data_root = '/home/minhnh/project_drive/CV/FewshotObjectDetection/data/OWID/'
+data_root = '/home/minhnh/project_drive/CV/FewshotObjectDetection/data/'
 dataset = 'RoboTools' # 'lmo' 'ycbv'
 img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
@@ -187,7 +187,8 @@ test_pipeline = [
             dict(type='RandomFlip'),
             dict(type='Normalize', **img_norm_cfg),
             dict(type='Pad', size_divisor=32),
-            dict(type='ImageToTensor', keys=['img']),
+            dict(type='DefaultFormatBundle'), #batch_eval
+            # dict(type='ImageToTensor', keys=['img']), #single_sample_eval
             dict(type='Collect', keys=['img']),
         ])
 ]
@@ -199,7 +200,8 @@ data = dict(
         p1_path=data_root + dataset + '/test_video/',
         ann_file=data_root + dataset + '/test/scene_gt_coco_all.json',
         img_prefix=data_root + dataset + '/test',
-        pipeline=test_pipeline))
+        pipeline=test_pipeline,
+        test_mode=True))
 
 lr_config = dict(
     policy='step',

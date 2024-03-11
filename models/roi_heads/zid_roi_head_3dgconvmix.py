@@ -136,8 +136,8 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
         new_proposals = origin_proposals[ind]
         proposals = [new_proposals]
         rpn_score = rpn_score[ind]
-
         rois = bbox2roi(proposals)
+        
         if not self.save_p1:
             p1_rois = bbox2roi([b.unsqueeze(0) for b in p1_2D['box']])
             p1_x = p1_2D['feat']
@@ -182,7 +182,6 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
                     bbox_pred, num_proposals_per_img)
         else:
             bbox_pred = (None, ) * len(proposals)
-
         # apply bbox post-processing to each image individually
         det_bboxes = []
         det_labels = []
@@ -281,7 +280,7 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
                     rescale=False):
         """Test without augmentation."""
         assert self.with_bbox, 'Bbox head must be implemented.'
-
+        
         det_bboxes, det_labels = self.simple_test_bboxes(
             x, img_metas, proposal_list, self.test_cfg, obj_id, p1_2D, rescale=rescale)
         if torch.onnx.is_in_onnx_export():

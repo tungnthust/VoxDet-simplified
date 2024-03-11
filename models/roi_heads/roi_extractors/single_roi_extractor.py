@@ -39,6 +39,7 @@ class SingleRoIExtractor(BaseRoIExtractor):
         Returns:
             Tensor: Level index (0-based) of each RoI, shape (k, )
         """
+        
         scale = torch.sqrt(
             (rois[:, 3] - rois[:, 1]) * (rois[:, 4] - rois[:, 2]))
         target_lvls = torch.floor(torch.log2(scale / self.finest_scale + 1e-6))

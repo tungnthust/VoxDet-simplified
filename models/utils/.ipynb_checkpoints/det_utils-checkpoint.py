@@ -5,7 +5,7 @@ import numpy as np
 from functools import partial
 from collections.abc import Sequence
 from terminaltables import AsciiTable
-from torchvision.ops import nms
+import torchvision
 from multiprocessing import Pool
 from .class_names import get_classes
 
@@ -90,7 +90,7 @@ def batched_nms(boxes: Tensor,
             boxes_for_nms = boxes + offsets[:, None]
 
     nms_type = nms_cfg_.pop('type', 'nms')
-    nms_op = eval(nms_type)
+    nms_op = nms
 
     split_thr = nms_cfg_.pop('split_thr', 10000)
     # Won't split to multiple nms nodes when exporting to onnx
@@ -187,7 +187,6 @@ def multiclass_nms(multi_bboxes,
             return bboxes, labels, inds
         else:
             return bboxes, labels
-
     # TODO: add size check before feed into batched_nms
     dets, keep = batched_nms(bboxes, scores, labels, nms_cfg)
     keep = keep.cpu()
@@ -375,6 +374,58 @@ def bbox_overlaps(bboxes1, bboxes2, mode='iou', is_aligned=False, eps=1e-6):
     enclose_area = torch.max(enclose_area, eps)
     gious = ious - (enclose_area - union) / enclose_area
     return gious
+        
+def nms(boxes, scores, iou_threshold, offset=0, score_threshold=0, max_num=-1):
+    """Dispatch to either CPU or GPU NMS implementations.
+
+    The input can be either torch tensor or numpy array. GPU NMS will be used
+    if the input is gpu tensor, otherwise CPU NMS
+    will be used. The returned type will always be the same as inputs.
+
+    Arguments:
+        boxes (torch.Tensor or np.ndarray): boxes in shape (N, 4).
+        scores (torch.Tensor or np.ndarray): scores in shape (N, ).
+        iou_threshold (float): IoU threshold for NMS.
+        offset (int, 0 or 1): boxes' width or height is (x2 - x1 + offset).
+        score_threshold (float): score threshold for NMS.
+        max_num (int): maximum number of boxes after NMS.
+
+    Returns:
+        tuple: kept dets(boxes and scores) and indice, which is always the \
+            same data type as the input.
+
+    Example:
+        >>> boxes = np.array([[49.1, 32.4, 51.0, 35.9],
+        >>>                   [49.3, 32.9, 51.0, 35.3],
+        >>>                   [49.2, 31.8, 51.0, 35.4],
+        >>>                   [35.1, 11.5, 39.1, 15.7],
+        >>>                   [35.6, 11.8, 39.3, 14.2],
+        >>>                   [35.3, 11.5, 39.9, 14.5],
+        >>>                   [35.2, 11.7, 39.7, 15.7]], dtype=np.float32)
+        >>> scores = np.array([0.9, 0.9, 0.5, 0.5, 0.5, 0.4, 0.3],\
+               dtype=np.float32)
+        >>> iou_threshold = 0.6
+        >>> dets, inds = nms(boxes, scores, iou_threshold)
+        >>> assert len(inds) == len(dets) == 3
+    """
+    assert isinstance(boxes, (torch.Tensor, np.ndarray))
+    assert isinstance(scores, (torch.Tensor, np.ndarray))
+    is_numpy = False
+    if isinstance(boxes, np.ndarray):
+        is_numpy = True
+        boxes = torch.from_numpy(boxes)
+    if isinstance(scores, np.ndarray):
+        scores = torch.from_numpy(scores)
+    assert boxes.size(1) == 4
+    assert boxes.size(0) == scores.size(0)
+    assert offset in (0, 1)
+    inds = torchvision.ops.nms(boxes, scores, iou_threshold)
+    dets = torch.cat((boxes[inds], scores[inds].reshape(-1, 1)), dim=1)
+    if is_numpy:
+        dets = dets.cpu().numpy()
+        inds = inds.cpu().numpy()
+    return dets, inds
+
 def images_to_levels(target, num_levels):
     """Convert targets by image to targets by feature level.
 
