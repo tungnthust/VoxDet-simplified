@@ -186,7 +186,8 @@ class ZidRCNN(TwoStageDetector):
             losses.update(rpn_losses)
         else:
             proposal_list = proposals
-
+        for proposal in proposal_list:
+            print("Proposal list: ", proposal.shape)
         roi_losses = self.roi_head.forward_train(x, img_metas, proposal_list,
                                                  gt_bboxes, gt_labels, query_pose,
                                                  gt_bboxes_ignore, gt_masks, p1_2D,

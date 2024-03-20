@@ -83,16 +83,21 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
         """Run forward function and calculate loss for box head in training."""
         B = x[0].shape[0]
         rois = bbox2roi([res.bboxes for res in sampling_results])
+        print("ROI", rois.shape)
+        print("ROI", rois[0], rois[255], rois[256], rois[512])
+
         p1_rois = bbox2roi([b.unsqueeze(0) for b in p1_2D['box']])
+        print("P1 ROI", p1_rois.shape)
         p1_x = p1_2D['feat']
         p1_feats = self.bbox_roi_extractor(
             p1_x[:self.bbox_roi_extractor.num_inputs], p1_rois)
         p1_feats = p1_feats.reshape(B, -1, p1_feats.shape[1], p1_feats.shape[2], p1_feats.shape[3])
+        print("P1 FEAT", p1_feats.shape)
         bbox_results = self._bbox_forward(x, rois, p1_feats, p1_2D['traj'])
-
+        print("bbox_results", bbox_results['bbox_pred'].shape, bbox_results['bbox_score'].shape)
         bbox_targets = self.bbox_head.get_targets(sampling_results, gt_bboxes,
                                                   gt_labels, self.train_cfg)
-
+        print("Bbox target", bbox_targets[2].shape)
         loss_bbox = self.bbox_head.loss(bbox_results['cls_score'],
                                         bbox_results['bbox_pred'], 
                                         bbox_results['bbox_score'],
@@ -252,7 +257,7 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
                     gt_labels[i],
                     feats=[lvl_feat[i][None] for lvl_feat in x])
                 sampling_results.append(sampling_result)
-
+                print("Sampling results ROI", sampling_result.bboxes.shape)
         losses = dict()
         # bbox head forward and loss
         if self.with_bbox:

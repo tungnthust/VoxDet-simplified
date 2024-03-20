@@ -146,7 +146,7 @@ class ZidDataset(CustomDataset):
             results['proposals'] = self.proposals[idx]
         self.pre_pipeline(results)
         data = self.pipeline(results)
-        p1_data = np.load(os.path.join(self.p1_path, str(img_info['obj_id']), 'info.npz'))
+        p1_data = np.load(os.path.join(self.p1_path, str(img_info['obj_id']), 'info224.npz'))
         data['rgb'] = torch.from_numpy(p1_data['rgb'].astype(np.float32))
         data['mask'] = torch.from_numpy(p1_data['mask'].astype(np.float32))
         imgids = list(range(40))
@@ -172,8 +172,8 @@ class ZidDataset(CustomDataset):
         if self.proposals is not None:
             results['proposals'] = self.proposals[idx]
         self.pre_pipeline(results)
-        data = self.pipeline(image=results)["image"]
-        p1_data = np.load(os.path.join(self.p1_path, str(img_info['obj_id']), 'info.npz'))
+        data = self.pipeline(results)
+        p1_data = np.load(os.path.join(self.p1_path, str(img_info['obj_id']), 'info224.npz'))
         data['rgb'] = torch.from_numpy(p1_data['rgb'].astype(np.float32))
         data['mask'] = torch.from_numpy(p1_data['mask'].astype(np.float32))
         # data['depth'] = torch.from_numpy(p1_data['depth'].astype(np.float32))
