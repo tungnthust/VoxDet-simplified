@@ -278,9 +278,12 @@ class OlnRPNHead(RPNHead):
         assign_result = self.assigner.assign(
             anchors, gt_bboxes, gt_bboxes_ignore,
             None if self.sampling else gt_labels)
+        # print(f"RPN Num assign {torch.sum(assign_result.gt_inds > 0)}")
         sampling_result = self.sampler.sample(assign_result, anchors,
                                               gt_bboxes)
-
+        # print("POS bbox", sampling_result.pos_bboxes)
+        # print(f"POS Gt bbox {self.sampling} {gt_bboxes[0]} {gt_bboxes_ignore}")
+        # print("GT bbox", sampling_result.pos_gt_bboxes)
         # Assign objectness gt and sample anchors
         objectness_assign_result = self.objectness_assigner.assign(
             anchors, gt_bboxes, gt_bboxes_ignore, None)
@@ -618,16 +621,16 @@ class OlnRPNHead(RPNHead):
         mlvl_scores = []
         mlvl_bbox_preds = []
         mlvl_valid_anchors = []
-        print("Cls_scores", len(cls_scores))
-        print("NMS Pre", cfg['nms_pre'])
+        # print("Cls_scores", len(cls_scores))
+        # print("NMS Pre", cfg['nms_pre'])
         for idx in range(len(cls_scores)):
             rpn_cls_score = cls_scores[idx]
             rpn_bbox_pred = bbox_preds[idx]
             # <
             rpn_objectness_score = objectness_scores[idx]
             # >
-            print("Cls_scores", objectness_scores[idx].shape)
-            print("bbox_preds", bbox_preds[idx].shape)
+            # print("Cls_scores", objectness_scores[idx].shape)
+            # print("bbox_preds", bbox_preds[idx].shape)
             assert rpn_cls_score.size()[-2:] == rpn_bbox_pred.size()[-2:]
             rpn_cls_score = rpn_cls_score.permute(1, 2, 0)
             
@@ -645,14 +648,14 @@ class OlnRPNHead(RPNHead):
 
             rpn_bbox_pred = rpn_bbox_pred.permute(1, 2, 0).reshape(-1, 4)
             anchors = mlvl_anchors[idx]
-            print("Anchr", anchors.shape)
+            # print("Anchr", anchors.shape)
             if cfg['nms_pre'] > 0 and scores.shape[0] > cfg['nms_pre']:
                 ranked_scores, rank_inds = scores.sort(descending=True)
                 topk_inds = rank_inds[:cfg['nms_pre']]
                 scores = ranked_scores[:cfg['nms_pre']]
                 rpn_bbox_pred = rpn_bbox_pred[topk_inds, :]
                 anchors = anchors[topk_inds, :]
-            print("Cls_scores", scores.shape)
+            # print("Cls_scores", scores.shape)
             mlvl_scores.append(scores)
             mlvl_bbox_preds.append(rpn_bbox_pred)
             mlvl_valid_anchors.append(anchors)
@@ -665,7 +668,9 @@ class OlnRPNHead(RPNHead):
         proposals = self.bbox_coder.decode(
             anchors, rpn_bbox_pred, max_shape=img_shape)
         ids = torch.cat(level_ids)
-        print("Valid anchors, ", anchors.shape)
+        # print("anchors ", anchors[:50])
+        # print("rpn_bbox_pred ", rpn_bbox_pred[:50])
+        # print("proposals ", proposals[:50])
         if cfg['min_bbox_size'] > 0:
             w = proposals[:, 2] - proposals[:, 0]
             h = proposals[:, 3] - proposals[:, 1]

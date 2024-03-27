@@ -29,7 +29,6 @@ class TrainLoop:
         data,
         optimizer='Adam',
         batch_size,
-        pretrained=None,
         resume_layers=None,
         resume_checkpoint=None,
         lr=5e-5,
@@ -50,6 +49,7 @@ class TrainLoop:
         
         self.batch_size = batch_size
         self.lr = lr
+        self.cur_lr = self.lr
         self.ema_rate = (
             [ema_rate]
             if isinstance(ema_rate, float)
@@ -70,9 +70,12 @@ class TrainLoop:
         self.num_workers = num_workers
         self.world_size = world_size
         self.step = 0
+        self.step_lr_update = [6,7]
         self.resume_step = 0
         self.global_batch = self.batch_size * dist.get_world_size()
         self.w = None
+        self.warmup_iters = 500
+        self.warmup_ratio = 0.001
         self.train_sampler = th.utils.data.distributed.DistributedSampler(data,
                                                                     num_replicas=self.world_size,
                                                                     rank=self.rank)
@@ -90,13 +93,6 @@ class TrainLoop:
         
         # self.iterdatal = iter(self.data)
         self.sync_cuda = th.cuda.is_available()
-        
-        if pretrained and resume_layers:
-            if dist.get_rank() == 0:
-                logger.log(f"loading model from pretrained model: {pretrained}...")
-                load_pretrained(self.model, pretrained, resume_layers)
-
-            dist_util.sync_params(self.model.parameters())
             
         self._load_and_sync_parameters()
         self.mp_trainer = MixedPrecisionTrainer(
@@ -111,7 +107,7 @@ class TrainLoop:
             )
         elif optimizer['type'] == 'Sergery':
             self.opt = build_optimizer_serge_recon(self.mp_trainer.model, optimizer)
-                                                  
+            self.base_lr = optimizer['lr']                                       
         
                                                    
         if self.resume_step:
@@ -194,11 +190,17 @@ class TrainLoop:
         for epoch in range(self.epoch, self.max_epoch):
             self.train_sampler.set_epoch(epoch)
             for batch in self.data:
-                self.run_step(batch)
+                try:
+                    self.run_step(batch)
+                except:
+                    self.step += 1
+                    continue
                 if self.step % self.log_interval == 0:
                     if self.rank == 0:
                         logger.dumpkvs()
                 self.step += 1
+                if self.step % 2000 == 0:
+                    self.save()
             self.epoch += 1
             self.save()
     # ['img', 'gt_bboxes', 'gt_labels', 'rgb', 'mask', 'traj', 'query_pose']
@@ -220,14 +222,27 @@ class TrainLoop:
                     batch[k] = batch[k].data[0]
                     for i in range(len(batch[k])):
                         batch[k][i] = batch[k][i].to(self.device, non_blocking=True)
+                elif k == 'gt_categories':
+                    batch[k] = batch[k].data[0]
+                    for i in range(len(batch[k])):
+                        batch[k][i] = batch[k][i].to(self.device, non_blocking=True)
+                elif k == 'support':
+                    batch[k] = batch[k].data[0]
+                    for i in range(len(batch[k])):
+                        batch[k][i]['rgb'] = batch[k][i]['rgb'].to(self.device, non_blocking=True)
+                        batch[k][i]['mask'] = batch[k][i]['mask'].to(self.device, non_blocking=True)
                 elif k in ['rgb', 'mask', 'traj', 'query_pose']:
                     batch[k] = batch[k].data.to(self.device, non_blocking=True)
-                
+        # print(batch)
+        if self.step < self.warmup_iters:
+            self._warmup_lr() 
+        else:
+            self._update_lr()
         self.forward_backward(batch)
         took_step = self.mp_trainer.optimize(self.opt)
         if took_step:
             self._update_ema()
-        self._anneal_lr()
+        # self._anneal_lr()
         if self.rank == 0:
             self.log_step()
 
@@ -252,6 +267,19 @@ class TrainLoop:
         for rate, params in zip(self.ema_rate, self.ema_params):
             update_ema(params, self.mp_trainer.master_params, rate=rate)
 
+    def _update_lr(self):
+        progress = self.epoch
+        exp = len(self.step_lr_update)
+        for i, s in enumerate(self.step_lr_update):
+            if progress < s:
+                exp = i
+                break
+
+        lr = self.base_lr * (0.1**exp)
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = lr
+        self.cur_lr = lr
+
     def _anneal_lr(self):
         if not self.lr_anneal_steps:
             return
@@ -259,8 +287,17 @@ class TrainLoop:
         lr = self.lr * (1 - frac_done)
         for param_group in self.opt.param_groups:
             param_group["lr"] = lr
+        self.cur_lr = lr
+
+    def _warmup_lr(self):
+        k = (1 - self.step / self.warmup_iters) * (1 - self.warmup_ratio)
+        warmup_lr = self.base_lr * (1 - k)
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = warmup_lr
+        self.cur_lr = warmup_lr
 
     def log_step(self):
+        logger.logkv("lr", self.cur_lr)
         logger.logkv("epoch", self.epoch + 1)
         logger.logkv("step", self.step + self.resume_step)
         logger.logkv("samples", (self.step + self.resume_step + 1) * self.global_batch)

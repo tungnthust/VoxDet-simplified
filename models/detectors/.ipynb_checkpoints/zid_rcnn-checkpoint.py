@@ -5,7 +5,10 @@ import torch.nn.functional as F
 import numpy as np
 import os
 import torchvision.transforms.functional as Ft
-
+from models.utils.rpn_utils import BboxOverlaps2D
+# from timm.models.vision_transformer import VisionTransformer, _cfg
+from functools import partial
+import numpy as np
 import pickle as pkl
 
 # visualization tool
@@ -21,8 +24,6 @@ import pickle as pkl
 # box = gt_bboxes[0].cpu().detach().numpy()[0]
 # x = cv2.rectangle(x, (int(box[0]), int(box[1])), (int(box[2]),int(box[3])), [0, 0, 255], 3)
 
-
-
 class ZidRCNN(TwoStageDetector):
     """Implementation of `Zid R-CNN <https://arxiv.org/abs/1506.01497>`_"""
 
@@ -31,10 +32,11 @@ class ZidRCNN(TwoStageDetector):
                  backbone,
                  rpn_head,
                  roi_head,
+                 support_pretrained,
                  train_cfg,
                  test_cfg,
                  mode='det',
-                 D=4,
+                 D=1,
                  neck=None,
                  pretrained=None):
         super(ZidRCNN, self).__init__(
@@ -43,13 +45,19 @@ class ZidRCNN(TwoStageDetector):
             rpn_head=rpn_head,
             roi_head=roi_head,
             train_cfg=train_cfg,
-            test_cfg=test_cfg,
-            pretrained=pretrained)
+            test_cfg=test_cfg)
+        self.support_pretrained = support_pretrained
+        # self.supp_feat_extract = VisionTransformer(
+        #         patch_size=16, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
+        #         norm_layer=partial(nn.LayerNorm, eps=1e-6))
+        # self.supp_feat_extract.default_cfg = _cfg()
         self.p1_2D = None
         self.neg_rpn = neg_rpn
         self.mode = mode
         self.D = D
-        
+
+        self.init_weights(pretrained=pretrained)
+
     @property
     def with_rpn(self):
         """bool: whether the detector has RPN"""
@@ -68,6 +76,7 @@ class ZidRCNN(TwoStageDetector):
                 Defaults to None.
         """
         super(TwoStageDetector, self).init_weights(pretrained)
+        print("LOAD Backbone ResNET50", pretrained)
         self.backbone.init_weights(pretrained=pretrained)
         if self.with_neck:
             if isinstance(self.neck, nn.Sequential):
@@ -79,6 +88,10 @@ class ZidRCNN(TwoStageDetector):
             self.rpn_head.init_weights()
         if self.with_roi_head:
             self.roi_head.init_weights(pretrained)
+        if self.support_pretrained:
+            print("LOAD DeIT")
+            # checkpoint = torch.load('/home/minhnh/project_drive/CV/FewshotObjectDetection/VoxDet-simplified/deit_small_patch16_224-cd65a155.pth')
+            # self.supp_feat_extract.load_state_dict(checkpoint["model"],strict=False)
 
     def extract_feat(self, img):
         """Directly extract features from the backbone+neck."""
@@ -86,6 +99,18 @@ class ZidRCNN(TwoStageDetector):
         if self.with_neck:
             x = self.neck(x)
         return x
+
+    def extract_supp_feat(self, support):
+        supp_feats = []
+        
+        for i in range(len(support)):
+            support_sampled = support[i]['rgb']
+            support_mask = support[i]['mask']
+            supp_feat = self.extract_feat(support_sampled.flatten(0,1))
+            mask = support_mask[:,:,0].flatten(0,1)
+            boxes_p1 = self.masks_to_boxes(mask)
+            supp_feats.append({'support_feat': supp_feat, 'support_bbox': boxes_p1})
+        return supp_feats
 
     def forward(self, img=None, img_metas=None, return_loss=True, **kwargs):
         """Calls either :func:`forward_train` or :func:`forward_test` depending
@@ -114,9 +139,11 @@ class ZidRCNN(TwoStageDetector):
                       img_metas,
                       gt_bboxes,
                       gt_labels,
+                      gt_categories,
                       rgb=None,
                       mask=None,
                       traj=None,
+                      support=None,
                       query_pose=None,
                       gt_bboxes_ignore=None,
                       gt_masks=None,
@@ -150,9 +177,10 @@ class ZidRCNN(TwoStageDetector):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
+            
         B = img.shape[0]
         x = self.extract_feat(img)
-
+        supp_feats = self.extract_supp_feat(support)
         # P1 2D information
         # downsampling
         # print("Downsampling templets, rate {}".format(self.D))
@@ -165,17 +193,17 @@ class ZidRCNN(TwoStageDetector):
         mask = mask[:,:,0].flatten(0,1)
         boxes_p1 = self.masks_to_boxes(mask)
         p1_2D = {'feat': ref_rgb, 'box': boxes_p1, 'mask': mask, 'traj': traj}
+        
         losses = dict()
-
         # RPN forward and loss
         if self.with_rpn:
             proposal_cfg = self.train_cfg.get('rpn_proposal',
                                               self.test_cfg['rpn'])
             # RPN only learn forground instance box
-            if not self.neg_rpn:
-                rpn_bboxes = [gt_box[0:1] for gt_box in gt_bboxes]
-            else:
-                rpn_bboxes = gt_bboxes
+            # if not self.neg_rpn:
+                # rpn_bboxes = [gt_box[0:1] for gt_box in gt_bboxes]
+            # else:
+            rpn_bboxes = gt_bboxes
             rpn_losses, proposal_list = self.rpn_head.forward_train(
                 x,
                 img_metas,
@@ -186,11 +214,11 @@ class ZidRCNN(TwoStageDetector):
             losses.update(rpn_losses)
         else:
             proposal_list = proposals
-        for proposal in proposal_list:
-            print("Proposal list: ", proposal.shape)
+        # for proposal in proposal_list:
+        #     # print("Proposal list: ", proposal.shape)
         roi_losses = self.roi_head.forward_train(x, img_metas, proposal_list,
                                                  gt_bboxes, gt_labels, query_pose,
-                                                 gt_bboxes_ignore, gt_masks, p1_2D,
+                                                 gt_bboxes_ignore, gt_masks, p1_2D, supp_feats, gt_categories,
                                                  **kwargs)
         losses.update(roi_losses)
         

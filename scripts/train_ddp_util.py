@@ -29,7 +29,6 @@ class TrainLoop:
         data,
         optimizer='Adam',
         batch_size,
-        pretrained=None,
         resume_layers=None,
         resume_checkpoint=None,
         lr=5e-5,
@@ -94,13 +93,6 @@ class TrainLoop:
         
         # self.iterdatal = iter(self.data)
         self.sync_cuda = th.cuda.is_available()
-        
-        if pretrained and resume_layers:
-            if dist.get_rank() == 0:
-                logger.log(f"loading model from pretrained model: {pretrained}...")
-                load_pretrained(self.model, pretrained, resume_layers)
-
-            dist_util.sync_params(self.model.parameters())
             
         self._load_and_sync_parameters()
         self.mp_trainer = MixedPrecisionTrainer(
@@ -198,11 +190,17 @@ class TrainLoop:
         for epoch in range(self.epoch, self.max_epoch):
             self.train_sampler.set_epoch(epoch)
             for batch in self.data:
-                self.run_step(batch)
+                try:
+                    self.run_step(batch)
+                except:
+                    self.step += 1
+                    continue
                 if self.step % self.log_interval == 0:
                     if self.rank == 0:
                         logger.dumpkvs()
                 self.step += 1
+                if self.step % 2000 == 0:
+                    self.save()
             self.epoch += 1
             self.save()
     # ['img', 'gt_bboxes', 'gt_labels', 'rgb', 'mask', 'traj', 'query_pose']
@@ -224,8 +222,18 @@ class TrainLoop:
                     batch[k] = batch[k].data[0]
                     for i in range(len(batch[k])):
                         batch[k][i] = batch[k][i].to(self.device, non_blocking=True)
+                elif k == 'gt_categories':
+                    batch[k] = batch[k].data[0]
+                    for i in range(len(batch[k])):
+                        batch[k][i] = batch[k][i].to(self.device, non_blocking=True)
+                elif k == 'support':
+                    batch[k] = batch[k].data[0]
+                    for i in range(len(batch[k])):
+                        batch[k][i]['rgb'] = batch[k][i]['rgb'].to(self.device, non_blocking=True)
+                        batch[k][i]['mask'] = batch[k][i]['mask'].to(self.device, non_blocking=True)
                 elif k in ['rgb', 'mask', 'traj', 'query_pose']:
                     batch[k] = batch[k].data.to(self.device, non_blocking=True)
+        # print(batch)
         if self.step < self.warmup_iters:
             self._warmup_lr() 
         else:

@@ -290,6 +290,7 @@ class LoadAnnotations(object):
         """
 
         results['gt_labels'] = results['ann_info']['labels'].copy()
+        results['gt_categories'] = results['ann_info']['categories'].copy()
         return results
 
     def _poly2mask(self, mask_ann, img_h, img_w):
@@ -477,7 +478,7 @@ class DefaultFormatBundle(object):
                 img = np.expand_dims(img, -1)
             img = np.ascontiguousarray(img.transpose(2, 0, 1))
             results['img'] = DC(to_tensor(img), stack=True)
-        for key in ['proposals', 'gt_bboxes', 'gt_bboxes_ignore', 'gt_labels']:
+        for key in ['proposals', 'gt_bboxes', 'gt_bboxes_ignore', 'gt_labels', 'gt_categories']:
             if key not in results:
                 continue
             results[key] = DC(to_tensor(results[key]))

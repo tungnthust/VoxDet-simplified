@@ -6,8 +6,29 @@ from torch.autograd import grad
 from .relation_3dtraj import Relate3DMix
 from .discriminator import NetD
 from .submodules import VGGPerceptualLoss
+from models.utils.rpn_utils import BboxOverlaps2D
+from torch.nn import functional as F
+import torch.nn as nn
 
-
+class ROIFeatureExtraction(nn.Module):
+    def __init__(self, channels, spatial_size):
+        super(ROIFeatureExtraction, self).__init__()
+        self.extract = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(channels * spatial_size ** 2, 4096),
+            nn.BatchNorm1d(4096),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(4096, 2048),
+            nn.BatchNorm1d(2048),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(2048, 1024),
+            nn.Sigmoid()
+        )
+    def forward(self, x):
+        return F.normalize(self.extract(x), dim=1)
+        
 class ZidRoIHead3DGConvMix(StandardRoIHead):
     """OLN Box head.
     
@@ -47,58 +68,220 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
         if self.save_p1:
             self.p1_info = {}
         self.rot_su = ("rot_weight" in support_guidance.keys())
+        self.roi_feat_extract = ROIFeatureExtraction(channels=256, spatial_size=7)
+
         if "rot_weight" in support_guidance.keys():
             self.rot_weight = support_guidance['rot_weight']
             self.rot_mode = support_guidance['rot_mode']
+    def supp_query_contrastive_loss(self, supp_features, roi_features, labels, ious, temperature=0.2):
+        labels = labels.T
+        ious = ious.T
+        similarity = torch.div(
+            torch.matmul(roi_features, supp_features.T), temperature)
+        # for numerical stability
+        sim_row_max, _ = torch.max(similarity, dim=1, keepdim=True)
+        similarity = similarity - sim_row_max.detach()
+        
+        exp_sim = torch.exp(similarity)
+        log_prob = similarity - torch.log(exp_sim.sum(dim=1, keepdim=True))
+        num_valid = torch.sum(torch.max(labels, dim=1)[0] > 0)
+        per_label_log_prob = (log_prob * labels * ious)[:num_valid].sum(1) / labels[:num_valid].sum(1)
 
-    def _bbox_forward(self, x, rois, p1_feats=None, p1_traj=None, p1_id=None):
+        # keep = ious >= self.iou_threshold
+        # per_label_log_prob = per_label_log_prob[keep]
+        loss = -per_label_log_prob
+
+        # coef = self._get_reweight_func(self.reweight_func)(ious)
+        # coef = coef[keep]
+
+        # loss = loss * coef
+        return loss.mean()
+        
+    def constrastive_learning(self, roi_feats, supp_feats, rois, gt_bboxes):
+        """
+        Args:
+            roi_feats (Tensor): [batch_size * num_rpn_per_img, 1000] 
+            agg_supp_feats (list[Tensors]): list of support features [batch_size, #supports, 1000]
+            rois (Tensor): [batch_size * num_rpn_per_img, 5] #5: img_id, x, y, xx, yy
+            gt_bboxes (list[Tensor]): Ground truth bboxes for each image with
+                shape (num_gts, 4) in [tl_x, tl_y, br_x, br_y] format.
+        Returns:
+            dict[str, Tensor]: a dictionary of components
+        """
+        num_imgs = len(gt_bboxes)
+        rpn = rois[:, 1:].reshape(num_imgs, -1, 4)
+        roi_feats = roi_feats.reshape(num_imgs, -1, roi_feats.shape[1])
+        iou_calculator = BboxOverlaps2D()
+        similarities = []
+        gt_similarities = []
+        assigned_gt_bboxes = []
+        loss_supp_query = 0
+        gt_similarites = []
+        gt_overlaps = []
+        for i in range(num_imgs):
+            overlaps = iou_calculator(gt_bboxes[i], rpn[i])
+            max_overlaps, argmax_overlaps = overlaps.max(dim=0)
+            num_gts, num_bboxes = overlaps.shape[0], overlaps.shape[1]
+            assigned_gt_inds = overlaps.new_full((num_bboxes, ),
+                                                         -1,
+                                                         dtype=torch.long)
+            pos_inds = max_overlaps >= 0.7
+            assigned_gt_inds[pos_inds] = argmax_overlaps[pos_inds]
+            
+            gt_similarity = torch.zeros_like(overlaps)
+            for j, gt_idx in enumerate(assigned_gt_inds):
+                if gt_idx >= 0:
+                    gt_similarity[gt_idx, j] = 1.0
+            loss_supp_query += self.supp_query_contrastive_loss(supp_feats[i], roi_feats[i], gt_similarity, overlaps)
+            gt_similarites.append(gt_similarity)
+            gt_overlaps.append(overlaps)
+        # torch.save({'supp_feats': supp_feats,
+        #             'roi_feats': roi_feats,
+        #             'gt_similarites': gt_similarites,
+        #             'gt_overlaps': gt_overlaps}, 'supquery.pt')
+                   
+        #     similarity = F.cosine_similarity(supp_feats[i].unsqueeze(1), roi_feats[i], dim=-1)
+        #     gt_similarities.append(gt_similarity)
+        #     similarities.append(similarity)
+        #     assigned_gt_bboxes.append(assigned_gt_inds)
+        # return dict(
+        #     gt_similarities=gt_similarities,
+        #     pred_similarities=similarities,
+        #     assigned_gt_bboxes=assigned_gt_bboxes
+        # )
+        return loss_supp_query.mean()
+
+    
+    def supervised_contrastive_learning(self, features, labels, temperature=0.2):
+        """
+        Args:
+            features (tensor): shape of [M, K] where M is the number of features to be compared,
+                and K is the feature_dim.   e.g., [50, 1024]
+            labels (tensor): shape of [M].  e.g., [50]
+        """
+        assert features.shape[0] == labels.shape[0]
+        if len(labels.shape) == 1:
+            labels = labels.reshape(-1, 1)
+
+        # mask of shape [None, None], mask_{i, j}=1 if sample i and sample j have the same label
+        label_mask = torch.eq(labels, labels.T).float()
+
+        similarity = torch.div(
+            torch.matmul(features, features.T), temperature)
+        # for numerical stability
+        sim_row_max, _ = torch.max(similarity, dim=1, keepdim=True)
+        similarity = similarity - sim_row_max.detach()
+
+        # mask out self-contrastive
+        logits_mask = torch.ones_like(similarity)
+        logits_mask.fill_diagonal_(0)
+
+        exp_sim = torch.exp(similarity) * logits_mask
+        log_prob = similarity - torch.log(exp_sim.sum(dim=1, keepdim=True))
+
+        per_label_log_prob = (log_prob * logits_mask * label_mask).sum(1) / label_mask.sum(1)
+
+        # keep = ious >= self.iou_threshold
+        # per_label_log_prob = per_label_log_prob[keep]
+        loss = -per_label_log_prob
+
+        # coef = self._get_reweight_func(self.reweight_func)(ious)
+        # coef = coef[keep]
+
+        # loss = loss * coef
+        return loss.mean()
+        
+    
+    def _bbox_forward(self, x, rois, p1_feats=None, p1_traj=None, p1_id=None, gt_bboxes=None, supp_feats=None,\
+                      supp_roi_feats_contrastive=None, supp_labels=None):
         """Box head forward function used in both training and testing."""
         # TODO: a more flexible way to decide which feature maps to use
+        B = x[0].shape[0]
         bbox_feats = self.bbox_roi_extractor(
             x[:self.bbox_roi_extractor.num_inputs], rois)
         if self.with_shared_head:
             bbox_feats = self.shared_head(bbox_feats)
         # test will pre save p1
-        if not self.save_p1:
-            rela, rot_vec = self.relate_3d(bbox_feats, p1_feats, p1_traj)
-        elif p1_id not in self.p1_info.keys():
-            rela, voxel_support, rot_vec = self.relate_3d(bbox_feats, p1_feats, p1_traj, return_support=True)
-            self.p1_info[p1_id] = {
-                'p1_feats': p1_feats,
-                'voxel_support': voxel_support
-            }
-        else:
-            p1_feats = self.p1_info[p1_id]['p1_feats']
-            rela, rot_vec = self.relate_3d(bbox_feats, self.p1_info[p1_id]['voxel_support'])
-        bbox_feat = {"ori": bbox_feats, "rela": rela, 'support': p1_feats}
-        cls_score, bbox_pred, bbox_score, contra_logits = self.bbox_head(bbox_feat)
+        # sample = dict(bbox_feats=bbox_feats, support=support, rois=rois, gt_bboxes=gt_bboxes)
+        
+        roi_feats = self.roi_feat_extract(bbox_feats)
+        for i in range(B):
+            supp_feats[i] = self.roi_feat_extract(supp_feats[i])
+        supp_roi_feats_contrastive = self.roi_feat_extract(supp_roi_feats_contrastive) 
+        loss_supcon = self.supervised_contrastive_learning(supp_roi_feats_contrastive, supp_labels)
+
+        loss_supp_query = self.constrastive_learning(roi_feats, supp_feats, rois, gt_bboxes)
+        # torch.save({'supp_roi_feats_contrastive': supp_roi_feats_contrastive,
+        #             'supp_labels': supp_labels}, 'supcon.pt')
+        # torch.save(out, "out.pt")
+        # cls_score = out['pred_similarities']
+        # gt_cls_score = out['gt_similarities']
+        # assigned_gt_bboxes = out['assigned_gt_bboxes']
+        
+        # print("BBOX_FEATS", bbox_feats.shape)
+        # print("P1_FEATS", p1_feats.shape)
+        # if not self.save_p1:
+        #     rela, rot_vec = self.relate_3d(bbox_feats, p1_feats, p1_traj)
+        # elif p1_id not in self.p1_info.keys():
+        #     rela, voxel_support, rot_vec = self.relate_3d(bbox_feats, p1_feats, p1_traj, return_support=True)
+        #     self.p1_info[p1_id] = {
+        #         'p1_feats': p1_feats,
+        #         'voxel_support': voxel_support
+        #     }
+        # else:
+        #     p1_feats = self.p1_info[p1_id]['p1_feats']
+        #     rela, rot_vec = self.relate_3d(bbox_feats, self.p1_info[p1_id]['voxel_support'])
+        bbox_feat = {"ori": bbox_feats, 'support': p1_feats}
+        bbox_pred, bbox_score, contra_logits = self.bbox_head(bbox_feat)
 
         bbox_results = dict(
-            cls_score=cls_score, bbox_pred=bbox_pred, bbox_feats=bbox_feats,
-            bbox_score=bbox_score, contra_logits=contra_logits, rot_vec=rot_vec)
+            loss_supcon=loss_supcon, loss_supp_query=loss_supp_query, bbox_pred=bbox_pred, bbox_feats=bbox_feats,
+            bbox_score=bbox_score, contra_logits=contra_logits)
         return bbox_results
 
     def _bbox_forward_train(self, x, sampling_results, gt_bboxes, gt_labels, query_pose,
-                            img_metas, p1_2D):
+                            img_metas, p1_2D, supp_feats, gt_categories):
         """Run forward function and calculate loss for box head in training."""
         B = x[0].shape[0]
         rois = bbox2roi([res.bboxes for res in sampling_results])
-        print("ROI", rois.shape)
-        print("ROI", rois[0], rois[255], rois[256], rois[512])
+        # print("ROI", rois.shape)
+        # print("ROI", rois[0], rois[255], rois[256], rois[512])
 
         p1_rois = bbox2roi([b.unsqueeze(0) for b in p1_2D['box']])
-        print("P1 ROI", p1_rois.shape)
+        # print("P1 ROI", p1_rois.shape)
         p1_x = p1_2D['feat']
         p1_feats = self.bbox_roi_extractor(
             p1_x[:self.bbox_roi_extractor.num_inputs], p1_rois)
         p1_feats = p1_feats.reshape(B, -1, p1_feats.shape[1], p1_feats.shape[2], p1_feats.shape[3])
-        print("P1 FEAT", p1_feats.shape)
-        bbox_results = self._bbox_forward(x, rois, p1_feats, p1_2D['traj'])
-        print("bbox_results", bbox_results['bbox_pred'].shape, bbox_results['bbox_score'].shape)
+        supp_roi_feats = []
+        supp_roi_feats_contrastive = []
+        supp_labels = []
+        for i in range(B):
+            supp_rois = bbox2roi([b.unsqueeze(0) for b in supp_feats[i]['support_bbox']])
+            # print("P1 ROI", p1_rois.shape)
+            support_x = supp_feats[i]['support_feat']
+            support_roi_feat = self.bbox_roi_extractor(
+                support_x, supp_rois)
+            num_gts = gt_bboxes[i].shape[0]
+            support_roi_feat = support_roi_feat.reshape(num_gts, -1, support_roi_feat.shape[1], support_roi_feat.shape[2], support_roi_feat.shape[3])
+            num_views = support_roi_feat.shape[1]
+            support_roi_feat_agg = torch.max(support_roi_feat, dim=1)[0]
+            supp_roi_feats.append(support_roi_feat_agg)
+            supp_roi_feats_contrastive.append(torch.cat([support_roi_feat, support_roi_feat_agg.unsqueeze(1)], dim=1).flatten(0,1))
+            supp_labels.append(gt_categories[i].repeat(num_views + 1, 1).transpose(1, 0).flatten())
+        supp_roi_feats_contrastive = torch.cat(supp_roi_feats_contrastive)
+        supp_labels = torch.cat(supp_labels)
+        
+            # print("SUPP FEAT", support_roi_feat.shape)
+        bbox_results = self._bbox_forward(x, rois, p1_feats, p1_2D['traj'], gt_bboxes=gt_bboxes, supp_feats=supp_roi_feats,\
+                                          supp_roi_feats_contrastive=supp_roi_feats_contrastive, supp_labels=supp_labels)
+        # print("bbox_results", bbox_results['bbox_pred'].shape, bbox_results['bbox_score'].shape)
         bbox_targets = self.bbox_head.get_targets(sampling_results, gt_bboxes,
                                                   gt_labels, self.train_cfg)
-        print("Bbox target", bbox_targets[2].shape)
-        loss_bbox = self.bbox_head.loss(bbox_results['cls_score'],
+        # print("Bbox target", bbox_targets[2].shape)
+
+        loss_bbox = self.bbox_head.loss(bbox_results['loss_supcon'],
+                                        bbox_results['loss_supp_query'],
                                         bbox_results['bbox_pred'], 
                                         bbox_results['bbox_score'],
                                         bbox_results['contra_logits'],
@@ -219,7 +402,9 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
                       query_pose,
                       gt_bboxes_ignore=None,
                       gt_masks=None,
-                      p1_2D=None):
+                      p1_2D=None,
+                      supp_feats=None,
+                      gt_categories=None):
         """
         Args:
             x (list[Tensor]): list of multi-level img features.
@@ -248,8 +433,12 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
             sampling_results = []
             for i in range(num_imgs):
                 assign_result = self.bbox_assigner.assign(
-                    proposal_list[i], gt_bboxes[i], gt_bboxes_ignore[i],
-                    gt_labels[i])
+                    proposal_list[i][:, :4], gt_bboxes[i], gt_bboxes_ignore[i],
+                    torch.zeros_like(gt_labels[i]))
+                # if (torch.sum(assign_result.gt_inds > 0) > 0):
+                #     print(f"ROI Num assign {torch.sum(assign_result.gt_inds > 0)}")
+                # # print(f"Proposal {proposal_list[i][:, :4][:50]}")
+                # print(f"Assign_result: {str(assign_result)} {assign_result.gt_inds[:50]} {assign_result.labels[:50]} {assign_result.max_overlaps[:50]}") 
                 sampling_result = self.bbox_sampler.sample(
                     assign_result,
                     proposal_list[i],
@@ -257,13 +446,15 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
                     gt_labels[i],
                     feats=[lvl_feat[i][None] for lvl_feat in x])
                 sampling_results.append(sampling_result)
-                print("Sampling results ROI", sampling_result.bboxes.shape)
+                # print(f"POS bbox {sampling_result.pos_bboxes.shape}, {sampling_result.pos_bboxes}")
+                # print("GT bbox", sampling_result.pos_gt_bboxes)
+                # print("Sampling results ROI", sampling_result.bboxes.shape)
         losses = dict()
         # bbox head forward and loss
         if self.with_bbox:
             bbox_results = self._bbox_forward_train(x, sampling_results,
                                                     gt_bboxes, gt_labels, query_pose,
-                                                    img_metas, p1_2D)
+                                                    img_metas, p1_2D, supp_feats, gt_categories)
             losses.update(bbox_results['loss_bbox'])
 
         # mask head forward and loss

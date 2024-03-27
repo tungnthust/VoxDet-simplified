@@ -7,6 +7,7 @@ import os
 import numpy as np
 import torch
 from .coco_api import COCO, COCOeval
+from models.utils.data_container import DataContainer as DC
 
 from models.utils.det_utils import eval_recalls
 from .custom import CustomDataset
@@ -39,7 +40,7 @@ class ZidDataset(CustomDataset):
         self.class_names_dict = ['ins_{:06d}'.format(i) for i in self.obj_ids]
         self.img_scale = img_scale
         self.ins_scale = ins_scale
-
+        self.D = 4
         super(ZidDataset, self).__init__(**kwargs)
 
     def load_annotations(self, ann_file):
@@ -99,7 +100,7 @@ class ZidDataset(CustomDataset):
         img_id = self.data_infos[idx]['id']
         ann_ids = self.coco.get_ann_ids(img_ids=[img_id])
         ann_info = self.coco.load_anns(ann_ids)
-        return self._parse_ann_info(self.data_infos[idx], [ann_info[self.data_infos[idx]['ann_id']]])
+        return self._parse_ann_info(self.data_infos[idx], ann_info)
 
     def get_cat_ids(self, idx):
         """Get COCO category ids by index.
@@ -147,8 +148,20 @@ class ZidDataset(CustomDataset):
         self.pre_pipeline(results)
         data = self.pipeline(results)
         p1_data = np.load(os.path.join(self.p1_path, str(img_info['obj_id']), 'info224.npz'))
-        data['rgb'] = torch.from_numpy(p1_data['rgb'].astype(np.float32))
-        data['mask'] = torch.from_numpy(p1_data['mask'].astype(np.float32))
+        M = p1_data['rgb'].shape[0]
+        data['rgb'] = torch.from_numpy(p1_data['rgb'].astype(np.float32))[range(0, M, self.D), :]
+        data['mask'] = torch.from_numpy(p1_data['mask'].astype(np.float32))[range(0, M, self.D), :]
+        data['support'] = dict(rgb=[], mask=[])
+        for category_id in ann_info['categories']:
+            support_data = np.load(os.path.join(self.p1_path, str(category_id), 'info224.npz'))
+            support_data_rgb = torch.from_numpy(support_data['rgb'].astype(np.float32))[range(0, M, self.D), :]
+            support_data_mask = torch.from_numpy(support_data['mask'].astype(np.float32))[range(0, M, self.D), :]
+            data['support']['rgb'].append(support_data_rgb)
+            data['support']['mask'].append(support_data_mask)
+        data['support']['rgb'] = torch.stack(data['support']['rgb'])
+        data['support']['mask'] = torch.stack(data['support']['mask'])
+        # print("SUPPORT", data['support'].shape)
+        data['support'] = DC(data['support'])
         imgids = list(range(40))
         cam_traj = self.cam2pose_rel(self.cam_pos[str(img_info['obj_id'])], imgids)
         cam_traj_q = self.cam2pose_rel_q(self.cam_pos[str(img_info['obj_id'])], ann_info['cam_R_m2c'])
@@ -183,7 +196,7 @@ class ZidDataset(CustomDataset):
         data['id'] = img_info['obj_id']
         return data
 
-    def _parse_ann_info(self, img_info, ann_info):
+    def _parse_ann_info(self, img_info, ann_infos):
         """Parse bbox and mask annotation.
 
         Args:
@@ -195,11 +208,14 @@ class ZidDataset(CustomDataset):
                 labels, masks, seg_map. "masks" are raw annotations and not \
                 decoded into binary masks.
         """
+        ann_info = [ann_infos[img_info['ann_id']]]
         gt_bboxes = []
         gt_labels = []
+        gt_categories = []
         gt_bboxes_ignore = []
         gt_masks_ann = []
         cam_R_m2c = []
+        categories_dict = [(ann['bbox'], ann['category_id']) for ann in ann_infos]
         for i, ann in enumerate(ann_info):
             assert len(ann_info) == 1
             if ann.get('ignore', False):
@@ -223,9 +239,12 @@ class ZidDataset(CustomDataset):
                 gt_bboxes.append(bbox)
                 gt_labels.append(self.cat2label[ann['category_id']])
                 gt_masks_ann.append(ann.get('segmentation', None))
-
+                gt_categories.append(ann['category_id'])
                 for neg_box in ann['neg_box']:
                     x1, y1, w, h = neg_box
+                    for box, category_id in categories_dict:
+                        if neg_box == box:
+                            gt_categories.append(category_id)
                     inter_w = max(0, min(x1 + w, img_info['width']) - max(x1, 0))
                     inter_h = max(0, min(y1 + h, img_info['height']) - max(y1, 0))
                     if inter_w * inter_h == 0:
@@ -242,7 +261,7 @@ class ZidDataset(CustomDataset):
         else:
             gt_bboxes = np.zeros((0, 4), dtype=np.float32)
             gt_labels = np.array([], dtype=np.int64)
-
+        gt_categories = np.array(gt_categories, dtype=np.int64)
         if gt_bboxes_ignore:
             gt_bboxes_ignore = np.array(gt_bboxes_ignore, dtype=np.float32)
         else:
@@ -253,6 +272,7 @@ class ZidDataset(CustomDataset):
         ann = dict(
             bboxes=gt_bboxes,
             labels=gt_labels,
+            categories=gt_categories,
             cam_R_m2c=cam_R_m2c,
             bboxes_ignore=gt_bboxes_ignore,
             masks=gt_masks_ann,

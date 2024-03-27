@@ -85,7 +85,8 @@ class BBoxHead(nn.Module):
         num_pos = pos_bboxes.size(0)
         num_neg = neg_bboxes.size(0)
         num_samples = num_pos + num_neg
-
+        print("POS_BBOXES", pos_bboxes.shape)
+        print("NEG_BBOXES", neg_bboxes.shape)
         # original implementation uses new_zeros since BG are set to be 0
         # now use empty & fill because BG cat_id = num_classes,
         # FG cat_id = [0, num_classes-1]
@@ -100,6 +101,7 @@ class BBoxHead(nn.Module):
             pos_weight = 1.0 if cfg['pos_weight'] <= 0 else cfg['pos_weight']
             label_weights[:num_pos] = pos_weight
             if not self.reg_decoded_bbox:
+                print("************* NOT DECODED")
                 pos_bbox_targets = self.bbox_coder.encode(
                     pos_bboxes, pos_gt_bboxes)
             else:
@@ -112,7 +114,10 @@ class BBoxHead(nn.Module):
             bbox_weights[:num_pos, :] = 1
         if num_neg > 0:
             label_weights[-num_neg:] = 1.0
-
+        print("LABELS: ", labels)
+        print("LABEL_WEIGHTS", label_weights)
+        print("BBOX_TARGETS", bbox_targets)
+        print("BBOX_WEIGHTS", bbox_weights)
         return labels, label_weights, bbox_targets, bbox_weights
 
     def get_targets(self,
@@ -601,37 +606,35 @@ class ConvFCBBoxSuperHead(ConvFCBBoxHead):
             nn.init.constant_(self.fc_bbox_score.bias, 0)
 
     def forward(self, x):
+        # print("Original", x['ori'].shape)
         # cos sim, use 2 features
         x_supp = x['support']
         B, N, C, W, H = x_supp.shape
+        # print("Supp", x_supp.shape)
         x_query = x['ori'].view(B, -1, C, W, H)
         # cls use relative feature
-        x_cls = x['rela']
+        # print("Query", x_query.shape)
+        
         # box and IoU regressor are open world, use original feature
         x_reg = x['ori']
         x_bbox_score = x['ori']
         if self.num_shared_convs > 0:
             for conv in self.shared_convs:
-                x_cls = conv(x_cls)
                 x_reg = conv(x_reg)
                 x_bbox_score = conv(x_bbox_score)
 
         if self.num_shared_fcs > 0:
             if self.with_avg_pool:
-                x_cls = self.avg_pool(x_cls)
                 x_reg = self.avg_pool(x_reg)
                 x_bbox_score = self.avg_pool(x_bbox_score)
 
-            x_cls = x_cls.flatten(1)
             x_reg = x_reg.flatten(1)
             x_bbox_score = x_bbox_score.flatten(1)
 
             for fc in self.shared_fcs:
-                x_cls = self.relu(fc(x_cls))
                 x_reg = self.relu(fc(x_reg))
                 x_bbox_score = self.relu(fc(x_bbox_score))
         # separate branches
-        cls_score = self.fc_cls(x_cls) if self.with_cls else None
         bbox_pred = self.fc_reg(x_reg) if self.with_reg else None
         bbox_score = (self.fc_bbox_score(x_bbox_score)
                       if self.with_bbox_score else None)
@@ -644,14 +647,15 @@ class ConvFCBBoxSuperHead(ConvFCBBoxHead):
         contra_logits = contra_logits.view(-1, N)
         contra_logits = torch.max(contra_logits, dim=1, keepdim=True).values
 
-        return cls_score, bbox_pred, bbox_score, contra_logits
+        return bbox_pred, bbox_score, contra_logits
 
     def _get_target_single(self, pos_bboxes, neg_bboxes, pos_gt_bboxes,
                            pos_gt_labels, cfg):
         num_pos = pos_bboxes.size(0)
         num_neg = neg_bboxes.size(0)
         num_samples = num_pos + num_neg
-
+        # print("POS_BBOXES", pos_bboxes.shape)
+        # print("NEG_BBOXES", neg_bboxes.shape)
         # original implementation uses new_zeros since BG are set to be 0
         # now use empty & fill because BG cat_id = num_classes,
         # FG cat_id = [0, num_classes-1]
@@ -670,6 +674,7 @@ class ConvFCBBoxSuperHead(ConvFCBBoxHead):
             label_weights[:num_pos] = pos_weight
 
             if not self.reg_decoded_bbox:
+                # print("************* NOT DECODED")
                 pos_bbox_targets = self.bbox_coder.encode(
                     pos_bboxes, pos_gt_bboxes)
             else:
@@ -730,10 +735,154 @@ class ConvFCBBoxSuperHead(ConvFCBBoxHead):
             curr_num = torch.where(contra_ind)[0].shape[0]
             if curr_num<self.num_conrta:
                 contra_ind[torch.where(labels==1)[0][num_pos-num_true_positive:self.num_conrta-curr_num]] = True
-
+        # print("LABELS: ", labels)
+        # print("LABEL_WEIGHTS", label_weights)
+        # print("BBOX_TARGETS", bbox_targets)
+        # print("BBOX_WEIGHTS", bbox_weights)
         return (labels, label_weights, bbox_targets, bbox_weights,
                 bbox_score_targets, bbox_score_weights, contra_labels, contra_ind)
 
+    def _get_target_single_new(self, sampling_results, pos_bboxes, neg_bboxes, pos_gt_bboxes,
+                           pos_gt_labels, assigned_gt_bboxes, gt_bboxes, cfg):
+        bbox_targets = torch.zeros(num_samples, 4).to(assigned_gt_bboxes.device)
+        bbox_weights = torch.zeros(num_samples, 4).to(assigned_gt_bboxes.device)
+        bbox_score_targets = torch.zeros(num_samples).to(assigned_gt_bboxes.device)
+        bbox_score_weights = torch.zeros(num_samples).to(assigned_gt_bboxes.device)
+        pos_inds = torch.where(assigned_gt_bboxes > -1)[0]
+        for i, idx in enumerate(assigned_gt_bboxes):
+            if idx >= 0:
+                bbox_targets[i] = gt_bboxes[idx]
+                bbox_weights[i] = 1
+                
+        num_pos = pos_bboxes.size(0)
+        num_neg = neg_bboxes.size(0)
+        num_samples = num_pos + num_neg
+        # print("POS_BBOXES", pos_bboxes.shape)
+        # print("NEG_BBOXES", neg_bboxes.shape)
+        # original implementation uses new_zeros since BG are set to be 0
+        # now use empty & fill because BG cat_id = num_classes,
+        # FG cat_id = [0, num_classes-1]
+        labels = pos_bboxes.new_full((num_samples, ),
+                                     self.num_classes,
+                                     dtype=torch.long)
+        label_weights = pos_bboxes.new_zeros(num_samples)
+        # bbox_targets = pos_bboxes.new_zeros(num_samples, 4)
+        # bbox_weights = pos_bboxes.new_zeros(num_samples, 4)
+        # bbox_score_targets = pos_bboxes.new_zeros(num_samples)
+        # bbox_score_weights = pos_bboxes.new_zeros(num_samples)
+
+        if num_pos > 0:
+            labels[:num_pos] = pos_gt_labels
+            pos_weight = 1.0 if cfg['pos_weight'] <= 0 else cfg['pos_weight']
+            label_weights[:num_pos] = pos_weight
+
+            if not self.reg_decoded_bbox:
+                print("************* NOT DECODED")
+                print("GT BBOXES", pos_gt_bboxes)
+                bbox_targets = self.bbox_coder.encode(
+                    sampling_results.bboxes, bbox_targets)
+            else:
+                # When the regression loss (e.g. `IouLoss`, `GIouLoss`)
+                # is applied directly on the decoded bounding boxes, both
+                # the predicted boxes and regression targets should be with
+                # absolute coordinate format.
+                pos_bbox_targets = pos_gt_bboxes
+            # bbox_targets[:num_pos, :] = pos_bbox_targets
+            # bbox_weights[:num_pos, :] = 1
+            
+            # Bbox-IoU as target
+            if self.bbox_score_type == 'BoxIoU':
+                pos_bbox_score_targets = bbox_overlaps(
+                    pos_bboxes, pos_gt_bboxes, is_aligned=True)
+            # Centerness as target
+            elif self.bbox_score_type == 'Centerness':
+                tblr_bbox_coder = build_bbox_coder(
+                    dict(type='TBLRBBoxCoder', normalizer=1.0))
+                pos_center_bbox_targets = tblr_bbox_coder.encode(
+                    pos_bboxes, pos_gt_bboxes)
+                valid_targets = torch.min(pos_center_bbox_targets,-1)[0] > 0
+                pos_center_bbox_targets[valid_targets==False,:] = 0
+                top_bottom = pos_center_bbox_targets[:,0:2]
+                left_right = pos_center_bbox_targets[:,2:4]
+                pos_bbox_score_targets = torch.sqrt(
+                    (torch.min(top_bottom, -1)[0] / 
+                        (torch.max(top_bottom, -1)[0] + 1e-12)) *
+                    (torch.min(left_right, -1)[0] / 
+                        (torch.max(left_right, -1)[0] + 1e-12)))
+            else:
+                raise ValueError(
+                    'bbox_score_type must be either "BoxIoU" (Default) or \
+                    "Centerness".')
+
+            bbox_score_targets[:num_pos] = pos_bbox_score_targets
+            if self.neg_head:
+                # IoU reg head also learn negtive boxes
+                bbox_score_weights[:num_pos] = 1.0
+            else:
+                # IoU reg head doesn't learn negtive boxes
+                bbox_score_weights[:num_pos] = 1 - pos_gt_labels
+
+        if num_neg > 0:
+            label_weights[-num_neg:] = 1.0
+        
+        # sample contrastive
+        # label is always [0]
+        contra_ind = pos_bboxes.new_zeros(num_samples)
+        contra_labels = torch.zeros((1, 1), dtype=torch.long).cuda()
+        contra_labels[0] = torch.tensor(0).cuda()
+        # positive inds
+        num_true_positive = torch.where(labels==0)[0].shape[0]
+        contra_ind[torch.where(labels==0)[0][0]] = True
+        # negtive inds
+        contra_ind[torch.where(labels==1)[0][0:num_pos-num_true_positive]] = True
+        if self.bg_conrta:
+            curr_num = torch.where(contra_ind)[0].shape[0]
+            if curr_num<self.num_conrta:
+                contra_ind[torch.where(labels==1)[0][num_pos-num_true_positive:self.num_conrta-curr_num]] = True
+        print("LABELS: ", labels)
+        print("LABEL_WEIGHTS", label_weights)
+        print("BBOX_TARGETS", bbox_targets)
+        print("BBOX_WEIGHTS", bbox_weights)
+        return (labels, label_weights, bbox_targets, bbox_weights,
+                bbox_score_targets, bbox_score_weights, contra_labels, contra_ind)
+
+    def get_targets_new(self,
+                    sampling_results,
+                    gt_bboxes,
+                    gt_labels,
+                    rcnn_train_cfg,
+                    assigned_gt_bboxes,
+                    concat=True,
+                    class_agnostic=False):
+        pos_bboxes_list = [res.pos_bboxes for res in sampling_results]
+        neg_bboxes_list = [res.neg_bboxes for res in sampling_results]
+        pos_gt_bboxes_list = [res.pos_gt_bboxes for res in sampling_results]
+        pos_gt_labels_list = [res.pos_gt_labels for res in sampling_results]
+        (labels, label_weights, bbox_targets, bbox_weights, 
+         bbox_score_targets, bbox_score_weights, contra_labels, contra_ind) = multi_apply(
+            self._get_target_single_new,
+            sampling_results,
+            pos_bboxes_list,
+            neg_bboxes_list,
+            pos_gt_bboxes_list,
+            pos_gt_labels_list,
+            assigned_gt_bboxes,
+            gt_bboxes,
+            cfg=rcnn_train_cfg)
+
+        if concat:
+            labels = torch.cat(labels, 0)
+            label_weights = torch.cat(label_weights, 0)
+            bbox_targets = torch.cat(bbox_targets, 0)
+            bbox_weights = torch.cat(bbox_weights, 0)
+            bbox_score_targets = torch.cat(bbox_score_targets, 0)
+            bbox_score_weights = torch.cat(bbox_score_weights, 0)
+            # contra_labels = torch.cat(contra_labels, 0).squeeze(-1)
+            # contra_ind = torch.cat(contra_ind, 0)
+
+        return (labels, label_weights, bbox_targets, bbox_weights,
+                bbox_score_targets, bbox_score_weights, contra_labels, contra_ind)
+        
     def get_targets(self,
                     sampling_results,
                     gt_bboxes,
@@ -767,8 +916,10 @@ class ConvFCBBoxSuperHead(ConvFCBBoxHead):
         return (labels, label_weights, bbox_targets, bbox_weights,
                 bbox_score_targets, bbox_score_weights, contra_labels, contra_ind)
 
+    
     def loss(self,
-             cls_score,
+             loss_supcon,
+             loss_supp_query,
              bbox_pred,
              bbox_score,
              contra_logits,
@@ -783,15 +934,30 @@ class ConvFCBBoxSuperHead(ConvFCBBoxHead):
              contra_ind,
              reduction_override=None):
         losses = dict()
-        if cls_score is not None:
-            avg_factor = max(torch.sum(label_weights > 0).float().item(), 1.)
-            if cls_score.numel() > 0:
-                losses['loss_cls'] = self.loss_cls(
-                    cls_score,
-                    labels,
-                    label_weights,
-                    avg_factor=avg_factor,
-                    reduction_override=reduction_override)
+        if loss_supcon is not None:
+            # avg_factor = max(torch.sum(label_weights > 0).float().item(), 1.)
+            # if cls_score.numel() > 0:
+            #     losses['loss_cls'] = self.loss_cls(
+            #         cls_score,
+            #         labels,
+            #         label_weights,
+            #         avg_factor=avg_factor,
+            #         reduction_override=reduction_override)
+            # losses_cls = 0
+            # B = len(cls_score)
+            # for i in range(B):
+            #     sub_loss = torch.abs(cls_score[i] - gt_cls_score[i])
+            #     inds = torch.where(bbox_weights.reshape(B, -1, 4)[:, :, 0][i] > 0)[0]
+            #     weights = torch.ones_like(sub_loss)
+            #     weights[:, inds] = 10
+            #     sub_loss *= weights
+            #     losses_cls += torch.mean(sub_loss)
+            losses['loss_supcon'] = loss_supcon
+            # print("LOSS CLS", losses['loss_cls'])
+        if loss_supp_query is not None:
+        
+            losses['loss_supp_query'] = loss_supp_query
+
         if contra_logits is not None:
             B = len(contra_ind)
             losses['loss_contra'] = 0
@@ -815,34 +981,39 @@ class ConvFCBBoxSuperHead(ConvFCBBoxHead):
                     reduction_override=reduction_override)
             losses['loss_contra'] /= B
             losses['loss_contra'] *= self.contra_weights
-
+            # print("LOSS CONTRA", losses['loss_contra'])
         if bbox_pred is not None:
             bg_class_ind = self.num_classes
             # 0~self.num_classes-1 are FG, self.num_classes is BG
             pos_inds = (labels >= 0) & (labels < bg_class_ind)
             # do not perform bounding box regression for BG anymore.
-            if pos_inds.any():
+            if True:
                 if self.reg_decoded_bbox:
                     # When the regression loss (e.g. `IouLoss`,
                     # `GIouLoss`, `DIouLoss`) is applied directly on
                     # the decoded bounding boxes, it decodes the
                     # already encoded coordinates to absolute format.
                     bbox_pred = self.bbox_coder.decode(rois[:, 1:], bbox_pred)
-                if self.reg_class_agnostic:
+                if True:
                     pos_bbox_pred = bbox_pred.view(
-                        bbox_pred.size(0), 4)[pos_inds.type(torch.bool)]
+                        bbox_pred.size(0), 4)
                 else:
                     pos_bbox_pred = bbox_pred.view(
                         bbox_pred.size(0), -1,
-                        4)[pos_inds.type(torch.bool),
-                           labels[pos_inds.type(torch.bool)]]
-
+                        4)
+                # print(bbox_weights)
+                # print(pos_bbox_pred)
+                # print(torch.sum(bbox_targets>0))
+                # torch.save({'pos_bbox_pred': pos_bbox_pred,
+                #             'bbox_targets': bbox_targets,
+                #             'bbox_weights': bbox_weights}, 'bbox.pt')
                 losses['loss_bbox'] = self.loss_bbox(
                     pos_bbox_pred,
-                    bbox_targets[pos_inds.type(torch.bool)],
-                    bbox_weights[pos_inds.type(torch.bool)],
-                    avg_factor=bbox_targets.size(0),
+                    bbox_targets,
+                    bbox_weights,
+                    avg_factor=torch.sum(bbox_weights) / 4,
                     reduction_override=reduction_override)
+                # print("LOSS BBOX", losses['loss_bbox'])
             else:
                 losses['loss_bbox'] = bbox_pred[pos_inds].sum()
 
@@ -854,7 +1025,7 @@ class ConvFCBBoxSuperHead(ConvFCBBoxHead):
                     bbox_score_weights,
                     avg_factor=bbox_score_targets.size(0),
                     reduction_override=reduction_override)
-
+                # print("LOSS BBOX SCORE", losses['loss_bbox_score'])
         # losses['acc'] = accuracy(cls_score[:,0:1].sigmoid()*bbox_score, labels)
         return losses
 

@@ -31,7 +31,7 @@ model = dict(
             type='TBLRBBoxCoder',
             normalizer=1.0,),
         loss_cls=dict(
-            type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+            type='CrossEntropyLoss', use_sigmoid=True, loss_weight=0.0),
         reg_decoded_bbox=True,
         loss_bbox=dict(type='IoULoss', linear=True, loss_weight=10.0),
         objectness_type='Centerness',
@@ -82,6 +82,7 @@ model = dict(
                 loss_weight=0.0,
                 ),
             )),
+    support_pretrained=True,
     # model training and testing settings
     train_cfg=dict(
         rpn=dict(
@@ -124,7 +125,7 @@ model = dict(
         rcnn=dict(
             assigner=dict(
                 type='MaxIoUAssigner',
-                pos_iou_thr=0.5,
+                pos_iou_thr=0.7,
                 neg_iou_thr=0.5,
                 min_pos_iou=0.5,
                 match_low_quality=False,
@@ -132,7 +133,7 @@ model = dict(
             sampler=dict(
                 type='InstanceSampler', # make sure gt is always input for ROI head
                 num=256,
-                pos_fraction=0.25,
+                pos_fraction=0.5,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=True),
             pos_weight=-1,
@@ -170,7 +171,7 @@ train_pipeline = [
     dict(type='Normalize', **img_norm_cfg),
     dict(type='Pad', size_divisor=32),
     dict(type='DefaultFormatBundle'),
-    dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels']),
+    dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels', 'gt_categories']),
 ]
 test_pipeline = [
     dict(type='LoadImageFromFile'),
@@ -231,7 +232,7 @@ dist_params = dict(backend='nccl')
 log_level = 'INFO'
 load_from = None
 resume_layers = ['relate_3d']
-resume_from = '/home/minhnh/project_drive/CV/FewshotObjectDetection/VoxDet-simplified/results/recon_ckpt/model_ep16_004800.pt'
+resume_from = '/home/minhnh/project_drive/CV/FewshotObjectDetection/outputs/VoxDet_p1/iter_19201.pth'
 resume_checkpoint = None
 workflow = [('train', 1)]
 
