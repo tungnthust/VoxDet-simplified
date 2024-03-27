@@ -47,13 +47,19 @@ class BaseDenseHead(nn.Module, metaclass=ABCMeta):
                 proposal_list (list[Tensor]): Proposals of each image.
         """
         outs = self(x)
+        # for out in outs[1]:
+        #     # print("Output RPN forward: ", out.shape)
+        # for out in outs[0]:
+            # print("Output RPN forward: ", out.shape)
         if gt_labels is None:
             loss_inputs = outs + (gt_bboxes, img_metas)
         else:
             loss_inputs = outs + (gt_bboxes, gt_labels, img_metas)
         losses = self.loss(*loss_inputs, gt_bboxes_ignore=gt_bboxes_ignore)
+        # print("AAA")
         if proposal_cfg is None:
             return losses
         else:
             proposal_list = self.get_bboxes(*outs, img_metas, cfg=proposal_cfg)
+            # print("BBBB")
             return losses, proposal_list

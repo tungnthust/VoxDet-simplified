@@ -53,7 +53,7 @@ class Compose(object):
         return format_string
 
 import inspect
-
+import os
 from models.utils.image_utils import imtransform
 import numpy as np
 from numpy import random
@@ -73,6 +73,88 @@ except ImportError:
 #     albumentations = None
 #     Compose = None
 
+class LoadP1Info(object):
+    """Load P1 images, masks, and depths from P1 folder.
+
+    Required keys are "P1_path", "obj_id"
+
+    Args:
+        to_float32 (bool): Whether to convert the loaded image to a float32
+            numpy array. If set to False, the loaded image is an uint8 array.
+            Defaults to False.
+        color_type (str): The flag argument for :func:`mmcv.imfrombytes`.
+            Defaults to 'color'.
+        file_client_args (dict): Arguments to instantiate a FileClient.
+            See :class:`mmcv.fileio.FileClient` for details.
+            Defaults to ``dict(backend='disk')``.
+    """
+
+    def __init__(self,
+                 target_sz=224,
+                 to_float32=False,
+                 color_type='color',
+                 file_client_args=dict(backend='disk')):
+        self.to_float32 = to_float32
+        self.color_type = color_type
+        self.file_client_args = file_client_args.copy()
+        self.file_client = None
+        self.sz = target_sz
+
+    def __call__(self, results):
+        """Call functions to load image and get image meta information.
+
+        Args:
+            results (dict): Result dict from :obj:`mmdet.CustomDataset`.
+
+        Returns:
+            dict: The dict contains loaded images.
+        """
+
+        RGB_path = os.path.join(results['P1_path'], str(results['obj_id']), 'rgb')
+        # Point_path = os.path.join(results['P1_path'], str(results['obj_id']), 'point')
+        Mask_path = os.path.join(results['P1_path'], str(results['obj_id']), 'mask')
+        num_temp = 40
+
+        filename = os.path.join(RGB_path, '{:06}.jpg'.format(0))
+        
+        
+        with open(filename, 'rb') as f:
+            img_bytes = f.read()
+        img = imtransform.imfrombytes(img_bytes, flag=self.color_type)
+        _, _, C = img.shape
+        rgb = np.zeros((num_temp, self.sz, self.sz, C))
+        mask = np.zeros((num_temp, self.sz, self.sz, C))
+
+        for i in range(num_temp):
+            rgb_filename = os.path.join(RGB_path, '{:06}.jpg'.format(i))
+            mask_filename = os.path.join(Mask_path, '{:06}.jpg'.format(i))
+            with open(rgb_filename, 'rb') as f:
+                rgb_bytes = f.read()
+            with open(mask_filename, 'rb') as f:
+                mask_bytes = f.read()
+            rgb_img = imtransform.imfrombytes(rgb_bytes, flag=self.color_type)
+            mask_img = imtransform.imfrombytes(mask_bytes, flag=self.color_type)
+
+            rgb[i, :, :, :] = imtransform.imresize(rgb_img, (self.sz, self.sz), return_scale=False)
+            mask[i, :, :, :] = imtransform.imresize(mask_img, (self.sz, self.sz), return_scale=False)
+        
+        if self.to_float32:
+            rgb = rgb.astype(np.float32)
+            mask = mask.astype(np.float32)
+
+        results['rgb'] = rgb
+        results['mask'] = mask
+        # results['point'] = point
+
+        return results
+
+    def __repr__(self):
+        repr_str = (f'{self.__class__.__name__}('
+                    f'to_float32={self.to_float32}, '
+                    f"color_type='{self.color_type}', "
+                    f'file_client_args={self.file_client_args})')
+        return repr_str
+    
 class LoadImageFromFile(object):
     """Load an image from file.
 
@@ -208,6 +290,7 @@ class LoadAnnotations(object):
         """
 
         results['gt_labels'] = results['ann_info']['labels'].copy()
+        results['gt_categories'] = results['ann_info']['categories'].copy()
         return results
 
     def _poly2mask(self, mask_ann, img_h, img_w):
@@ -395,7 +478,7 @@ class DefaultFormatBundle(object):
                 img = np.expand_dims(img, -1)
             img = np.ascontiguousarray(img.transpose(2, 0, 1))
             results['img'] = DC(to_tensor(img), stack=True)
-        for key in ['proposals', 'gt_bboxes', 'gt_bboxes_ignore', 'gt_labels']:
+        for key in ['proposals', 'gt_bboxes', 'gt_bboxes_ignore', 'gt_labels', 'gt_categories']:
             if key not in results:
                 continue
             results[key] = DC(to_tensor(results[key]))
@@ -2431,6 +2514,7 @@ class CutOut(object):
         return repr_str
 
 transform_types = {
+    'LoadP1Info': LoadP1Info,
     'LoadImageFromFile': LoadImageFromFile,
     'LoadAnnotations': LoadAnnotations,
     'Resize': Resize,
@@ -2440,7 +2524,7 @@ transform_types = {
     'DefaultFormatBundle': DefaultFormatBundle,
     'Collect': Collect,
     'MultiScaleFlipAug': MultiScaleFlipAug,
-    'ImageToTensor': ImagesToTensor
+    'ImagesToTensor': ImagesToTensor
 }
 
 
