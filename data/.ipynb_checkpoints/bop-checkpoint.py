@@ -137,7 +137,7 @@ class BopDataset(CustomDataset):
             results['proposals'] = self.proposals[idx]
         self.pre_pipeline(results)
         data = self.pipeline(results)
-        p1_data = np.load(os.path.join(self.p1_path, 'obj_{:06d}'.format(img_info['category_id']), 'info.npz'))
+        p1_data = np.load(os.path.join(self.p1_path, 'obj_{:06d}'.format(img_info['category_id']), 'info224.npz'))
         data['rgb'] = torch.from_numpy(p1_data['rgb'].astype(np.float32))
         data['mask'] = torch.from_numpy(p1_data['mask'].astype(np.float32))
         # data['point'] = torch.from_numpy(p1_data['point'].astype(np.float32))
