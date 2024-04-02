@@ -32,7 +32,6 @@ class ZidRCNN(TwoStageDetector):
                  backbone,
                  rpn_head,
                  roi_head,
-                 support_pretrained,
                  train_cfg,
                  test_cfg,
                  mode='det',
@@ -46,7 +45,6 @@ class ZidRCNN(TwoStageDetector):
             roi_head=roi_head,
             train_cfg=train_cfg,
             test_cfg=test_cfg)
-        self.support_pretrained = support_pretrained
         # self.supp_feat_extract = VisionTransformer(
         #         patch_size=16, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
         #         norm_layer=partial(nn.LayerNorm, eps=1e-6))
@@ -88,10 +86,6 @@ class ZidRCNN(TwoStageDetector):
             self.rpn_head.init_weights()
         if self.with_roi_head:
             self.roi_head.init_weights(pretrained)
-        if self.support_pretrained:
-            print("LOAD DeIT")
-            # checkpoint = torch.load('/home/minhnh/project_drive/CV/FewshotObjectDetection/VoxDet-simplified/deit_small_patch16_224-cd65a155.pth')
-            # self.supp_feat_extract.load_state_dict(checkpoint["model"],strict=False)
 
     def extract_feat(self, img):
         """Directly extract features from the backbone+neck."""

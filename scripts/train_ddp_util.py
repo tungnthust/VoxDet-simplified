@@ -199,7 +199,7 @@ class TrainLoop:
                     if self.rank == 0:
                         logger.dumpkvs()
                 self.step += 1
-                if self.step % 2000 == 0:
+                if self.step % 4000 == 0:
                     self.save()
             self.epoch += 1
             self.save()
