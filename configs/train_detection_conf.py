@@ -82,7 +82,6 @@ model = dict(
                 loss_weight=0.0,
                 ),
             )),
-    support_pretrained=True,
     # model training and testing settings
     train_cfg=dict(
         rpn=dict(

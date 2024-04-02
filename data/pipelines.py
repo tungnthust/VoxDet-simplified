@@ -113,7 +113,7 @@ class LoadP1Info(object):
         RGB_path = os.path.join(results['P1_path'], str(results['obj_id']), 'rgb')
         # Point_path = os.path.join(results['P1_path'], str(results['obj_id']), 'point')
         Mask_path = os.path.join(results['P1_path'], str(results['obj_id']), 'mask')
-        num_temp = 40
+        num_temp = 160
 
         filename = os.path.join(RGB_path, '{:06}.jpg'.format(0))
         

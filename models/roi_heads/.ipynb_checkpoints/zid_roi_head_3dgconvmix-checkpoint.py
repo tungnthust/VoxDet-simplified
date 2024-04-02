@@ -23,8 +23,7 @@ class ROIFeatureExtraction(nn.Module):
             nn.BatchNorm1d(2048),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(2048, 1024),
-            nn.Sigmoid()
+            nn.Linear(2048, 1024)
         )
     def forward(self, x):
         return F.normalize(self.extract(x), dim=1)
@@ -205,9 +204,9 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
         # sample = dict(bbox_feats=bbox_feats, support=support, rois=rois, gt_bboxes=gt_bboxes)
         
         roi_feats = self.roi_feat_extract(bbox_feats)
-        for i in range(B):
-            supp_feats[i] = self.roi_feat_extract(supp_feats[i])
-        supp_roi_feats_contrastive = self.roi_feat_extract(supp_roi_feats_contrastive) 
+        # for i in range(B):
+        #     supp_feats[i] = self.roi_feat_extract(supp_feats[i])
+        # supp_roi_feats_contrastive = self.roi_feat_extract(supp_roi_feats_contrastive) 
         loss_supcon = self.supervised_contrastive_learning(supp_roi_feats_contrastive, supp_labels)
 
         loss_supp_query = self.constrastive_learning(roi_feats, supp_feats, rois, gt_bboxes)
@@ -261,17 +260,21 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
             # print("P1 ROI", p1_rois.shape)
             support_x = supp_feats[i]['support_feat']
             support_roi_feat = self.bbox_roi_extractor(
-                support_x, supp_rois)
+                support_x[:self.bbox_roi_extractor.num_inputs], supp_rois)
             num_gts = gt_bboxes[i].shape[0]
-            support_roi_feat = support_roi_feat.reshape(num_gts, -1, support_roi_feat.shape[1], support_roi_feat.shape[2], support_roi_feat.shape[3])
-            num_views = support_roi_feat.shape[1]
-            support_roi_feat_agg = torch.max(support_roi_feat, dim=1)[0]
+            support_roi_feat = self.roi_feat_extract(support_roi_feat)
+            # support_roi_feat = support_roi_feat.reshape(num_gts, -1, support_roi_feat.shape[1], support_roi_feat.shape[2], support_roi_feat.shape[3])
+            
+            
+            # support_roi_feat_flatten = self.roi_feat_extract(support_roi_feat.flatten(0,1))
+            support_roi_feat_agg = F.normalize(torch.max(support_roi_feat.reshape(num_gts, -1, support_roi_feat.shape[1]), dim=1)[0], dim=1)
+            num_views = 10
             supp_roi_feats.append(support_roi_feat_agg)
-            supp_roi_feats_contrastive.append(torch.cat([support_roi_feat, support_roi_feat_agg.unsqueeze(1)], dim=1).flatten(0,1))
+            supp_roi_feats_contrastive.append(torch.cat([support_roi_feat.reshape(num_gts, -1, support_roi_feat.shape[1]), support_roi_feat_agg.unsqueeze(1)], dim=1).flatten(0,1))
             supp_labels.append(gt_categories[i].repeat(num_views + 1, 1).transpose(1, 0).flatten())
         supp_roi_feats_contrastive = torch.cat(supp_roi_feats_contrastive)
         supp_labels = torch.cat(supp_labels)
-        
+        # torch.save(dict(supp_roi_feats_contrastive=supp_roi_feats_contrastive, supp_roi_feats=supp_roi_feats, supp_labels=supp_labels), "outt.pt")
             # print("SUPP FEAT", support_roi_feat.shape)
         bbox_results = self._bbox_forward(x, rois, p1_feats, p1_2D['traj'], gt_bboxes=gt_bboxes, supp_feats=supp_roi_feats,\
                                           supp_roi_feats_contrastive=supp_roi_feats_contrastive, supp_labels=supp_labels)
