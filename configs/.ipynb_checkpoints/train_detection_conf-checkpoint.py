@@ -82,6 +82,7 @@ model = dict(
                 loss_weight=0.0,
                 ),
             )),
+    support_pretrained=True,
     # model training and testing settings
     train_cfg=dict(
         rpn=dict(
@@ -132,7 +133,7 @@ model = dict(
             sampler=dict(
                 type='InstanceSampler', # make sure gt is always input for ROI head
                 num=256,
-                pos_fraction=0.75,
+                pos_fraction=0.5,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=True),
             pos_weight=-1,
@@ -166,11 +167,11 @@ train_pipeline = [
     dict(type='LoadImageFromFile'),
     dict(type='LoadAnnotations', with_bbox=True),
     dict(type='Resize', img_scale=(1333, 800), keep_ratio=True),
-    # dict(type='RandomFlip', flip_ratio=0.5),
+    dict(type='RandomFlip', flip_ratio=0.5),
     dict(type='Normalize', **img_norm_cfg),
-    # dict(type='Pad', size_divisor=32),
+    dict(type='Pad', size_divisor=32),
     dict(type='DefaultFormatBundle'),
-    dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels', 'gt_categories', 'proposals']),
+    dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels', 'gt_categories']),
 ]
 test_pipeline = [
     dict(type='LoadImageFromFile'),
@@ -180,9 +181,9 @@ test_pipeline = [
         flip=False,
         transforms=[
             dict(type='Resize', keep_ratio=True),
-            # dict(type='RandomFlip'),
+            dict(type='RandomFlip'),
             dict(type='Normalize', **img_norm_cfg),
-            # dict(type='Pad', size_divisor=32),
+            dict(type='Pad', size_divisor=32),
             dict(type='ImageToTensor', keys=['img']),
             dict(type='Collect', keys=['img']),
         ])
@@ -232,7 +233,7 @@ log_level = 'INFO'
 load_from = None
 resume_layers = ['relate_3d']
 resume_from = '/home/minhnh/project_drive/CV/FewshotObjectDetection/outputs/VoxDet_p1/iter_19201.pth'
-resume_checkpoint = '/home/minhnh/project_drive/CV/FewshotObjectDetection/VoxDet-simplified/results/ckpt/model_ep04_027250.pt'
+resume_checkpoint = None
 workflow = [('train', 1)]
 
 work_dir='outputs/VoxDet_p2_1'

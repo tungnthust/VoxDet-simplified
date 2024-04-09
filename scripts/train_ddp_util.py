@@ -31,7 +31,7 @@ class TrainLoop:
         batch_size,
         resume_layers=None,
         resume_checkpoint=None,
-        lr=1e-4,
+        lr=5e-5,
         ema_rate="0.9999",
         log_interval=10,
         use_fp16=False,
@@ -101,13 +101,13 @@ class TrainLoop:
             fp16_scale_growth=fp16_scale_growth,
         )
         print(f'Rank: {self.rank} - Device: {self.device} {dist.get_rank()}')
-        # if optimizer['type'] == 'Adam':
-        self.opt = AdamW(
-            self.mp_trainer.master_params, lr=self.lr, betas=(0.9, 0.999), weight_decay=self.weight_decay
-        )
-        # elif optimizer['type'] == 'Sergery':
-        #     self.opt = build_optimizer_serge_recon(self.mp_trainer.model, optimizer)
-        #     self.base_lr = optimizer['lr']                                       
+        if optimizer['type'] == 'Adam':
+            self.opt = AdamW(
+                self.mp_trainer.master_params, lr=self.lr, betas=(0.9, 0.999), weight_decay=self.weight_decay
+            )
+        elif optimizer['type'] == 'Sergery':
+            self.opt = build_optimizer_serge_recon(self.mp_trainer.model, optimizer)
+            self.base_lr = optimizer['lr']                                       
         
                                                    
         if self.resume_step:
@@ -199,8 +199,8 @@ class TrainLoop:
                     if self.rank == 0:
                         logger.dumpkvs()
                 self.step += 1
-                # if self.step % 4000 == 0:
-                #     self.save()
+                if self.step % 2000 == 0:
+                    self.save()
             self.epoch += 1
             self.save()
     # ['img', 'gt_bboxes', 'gt_labels', 'rgb', 'mask', 'traj', 'query_pose']
@@ -226,10 +226,6 @@ class TrainLoop:
                     batch[k] = batch[k].data[0]
                     for i in range(len(batch[k])):
                         batch[k][i] = batch[k][i].to(self.device, non_blocking=True)
-                elif k == 'proposals':
-                    batch[k] = batch[k].data[0]
-                    for i in range(len(batch[k])):
-                        batch[k][i] = batch[k][i].to(self.device, non_blocking=True)
                 elif k == 'support':
                     batch[k] = batch[k].data[0]
                     for i in range(len(batch[k])):
@@ -238,15 +234,15 @@ class TrainLoop:
                 elif k in ['rgb', 'mask', 'traj', 'query_pose']:
                     batch[k] = batch[k].data.to(self.device, non_blocking=True)
         # print(batch)
-        # if self.step < self.warmup_iters:
-        #     self._warmup_lr() 
-        # else:
-        #     self._update_lr()
+        if self.step < self.warmup_iters:
+            self._warmup_lr() 
+        else:
+            self._update_lr()
         self.forward_backward(batch)
         took_step = self.mp_trainer.optimize(self.opt)
         if took_step:
             self._update_ema()
-        self._anneal_lr()
+        # self._anneal_lr()
         if self.rank == 0:
             self.log_step()
 

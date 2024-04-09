@@ -23,7 +23,8 @@ class ROIFeatureExtraction(nn.Module):
             nn.BatchNorm1d(2048),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(2048, 1024)
+            nn.Linear(2048, 1024),
+            nn.Sigmoid()
         )
     def forward(self, x):
         return F.normalize(self.extract(x), dim=1)
@@ -96,7 +97,7 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
         # loss = loss * coef
         return loss.mean()
         
-    def constrastive_learning(self, roi_feats, supp_feats, rois, gt_bboxes, gt_categories):
+    def constrastive_learning(self, roi_feats, supp_feats, rois, gt_bboxes):
         """
         Args:
             roi_feats (Tensor): [batch_size * num_rpn_per_img, 1000] 
@@ -131,33 +132,7 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
             for j, gt_idx in enumerate(assigned_gt_inds):
                 if gt_idx >= 0:
                     gt_similarity[gt_idx, j] = 1.0
-            neg_supp_feats = supp_feats.copy()
-            neg_gt_categories = gt_categories.copy()
-            neg_gt_categories.pop(i)
-            neg_supp_feats.pop(i)
-            for neg_idx in range(len(neg_gt_categories)):
-                exclude_idx = list(range(len(neg_gt_categories[neg_idx])))
-                
-                for j in range(len(neg_gt_categories[neg_idx])):
-                    if neg_gt_categories[neg_idx][j] in gt_categories[i]:
-                        exclude_idx.remove(j)
-                neg_supp_feats[neg_idx] = neg_supp_feats[neg_idx][exclude_idx]
-            neg_supp_feats = torch.cat(neg_supp_feats)
-            num_neg_supp = neg_supp_feats.shape[0]
-            neg_overlaps = torch.zeros(num_neg_supp, overlaps.shape[1]).to(overlaps.device)
-            neg_gt_similarity = torch.zeros(num_neg_supp, overlaps.shape[1]).to(overlaps.device)
-
-            support_features = torch.cat([supp_feats[i], neg_supp_feats])
-            gt_similarity = torch.cat([gt_similarity, neg_gt_similarity])
-            overlaps = torch.cat([overlaps, neg_overlaps])
-            
-            # output_dict = dict(support_features=support_features,
-            #                 roi_feats=roi_feats[i],
-            #                 gt_similarity=gt_similarity,
-            #                 overlaps=overlaps)
-
-            # torch.save(output_dict, 'output.pt')
-            loss_supp_query += self.supp_query_contrastive_loss(support_features, roi_feats[i], gt_similarity, overlaps)
+            loss_supp_query += self.supp_query_contrastive_loss(supp_feats[i], roi_feats[i], gt_similarity, overlaps)
             gt_similarites.append(gt_similarity)
             gt_overlaps.append(overlaps)
         # torch.save({'supp_feats': supp_feats,
@@ -218,7 +193,7 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
         
     
     def _bbox_forward(self, x, rois, p1_feats=None, p1_traj=None, p1_id=None, gt_bboxes=None, supp_feats=None,\
-                      supp_roi_feats_contrastive=None, supp_labels=None, gt_categories=None):
+                      supp_roi_feats_contrastive=None, supp_labels=None):
         """Box head forward function used in both training and testing."""
         # TODO: a more flexible way to decide which feature maps to use
         B = x[0].shape[0]
@@ -230,12 +205,12 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
         # sample = dict(bbox_feats=bbox_feats, support=support, rois=rois, gt_bboxes=gt_bboxes)
         
         roi_feats = self.roi_feat_extract(bbox_feats)
-        # for i in range(B):
-        #     supp_feats[i] = self.roi_feat_extract(supp_feats[i])
-        # supp_roi_feats_contrastive = self.roi_feat_extract(supp_roi_feats_contrastive) 
+        for i in range(B):
+            supp_feats[i] = self.roi_feat_extract(supp_feats[i])
+        supp_roi_feats_contrastive = self.roi_feat_extract(supp_roi_feats_contrastive) 
         loss_supcon = self.supervised_contrastive_learning(supp_roi_feats_contrastive, supp_labels)
 
-        loss_supp_query = self.constrastive_learning(roi_feats, supp_feats, rois, gt_bboxes, gt_categories)
+        loss_supp_query = self.constrastive_learning(roi_feats, supp_feats, rois, gt_bboxes)
         # torch.save({'supp_roi_feats_contrastive': supp_roi_feats_contrastive,
         #             'supp_labels': supp_labels}, 'supcon.pt')
         # torch.save(out, "out.pt")
@@ -286,24 +261,20 @@ class ZidRoIHead3DGConvMix(StandardRoIHead):
             # print("P1 ROI", p1_rois.shape)
             support_x = supp_feats[i]['support_feat']
             support_roi_feat = self.bbox_roi_extractor(
-                support_x[:self.bbox_roi_extractor.num_inputs], supp_rois)
+                support_x, supp_rois)
             num_gts = gt_bboxes[i].shape[0]
-            support_roi_feat = self.roi_feat_extract(support_roi_feat)
-            # support_roi_feat = support_roi_feat.reshape(num_gts, -1, support_roi_feat.shape[1], support_roi_feat.shape[2], support_roi_feat.shape[3])
-            
-            
-            # support_roi_feat_flatten = self.roi_feat_extract(support_roi_feat.flatten(0,1))
-            support_roi_feat_agg = F.normalize(torch.max(support_roi_feat.reshape(num_gts, -1, support_roi_feat.shape[1]), dim=1)[0], dim=1)
-            num_views = 10
+            support_roi_feat = support_roi_feat.reshape(num_gts, -1, support_roi_feat.shape[1], support_roi_feat.shape[2], support_roi_feat.shape[3])
+            num_views = support_roi_feat.shape[1]
+            support_roi_feat_agg = torch.max(support_roi_feat, dim=1)[0]
             supp_roi_feats.append(support_roi_feat_agg)
-            supp_roi_feats_contrastive.append(torch.cat([support_roi_feat.reshape(num_gts, -1, support_roi_feat.shape[1]), support_roi_feat_agg.unsqueeze(1)], dim=1).flatten(0,1))
+            supp_roi_feats_contrastive.append(torch.cat([support_roi_feat, support_roi_feat_agg.unsqueeze(1)], dim=1).flatten(0,1))
             supp_labels.append(gt_categories[i].repeat(num_views + 1, 1).transpose(1, 0).flatten())
         supp_roi_feats_contrastive = torch.cat(supp_roi_feats_contrastive)
         supp_labels = torch.cat(supp_labels)
-        # torch.save(dict(supp_roi_feats_contrastive=supp_roi_feats_contrastive, supp_roi_feats=supp_roi_feats, supp_labels=supp_labels), "outt.pt")
+        
             # print("SUPP FEAT", support_roi_feat.shape)
         bbox_results = self._bbox_forward(x, rois, p1_feats, p1_2D['traj'], gt_bboxes=gt_bboxes, supp_feats=supp_roi_feats,\
-                                          supp_roi_feats_contrastive=supp_roi_feats_contrastive, supp_labels=supp_labels, gt_categories=gt_categories)
+                                          supp_roi_feats_contrastive=supp_roi_feats_contrastive, supp_labels=supp_labels)
         # print("bbox_results", bbox_results['bbox_pred'].shape, bbox_results['bbox_score'].shape)
         bbox_targets = self.bbox_head.get_targets(sampling_results, gt_bboxes,
                                                   gt_labels, self.train_cfg)

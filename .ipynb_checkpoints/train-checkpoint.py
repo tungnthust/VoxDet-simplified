@@ -13,7 +13,7 @@ NUM_NODE = 1
 def init_processes(dataset, rank, world_size, gpu_id, cfg):
     """ Initialize the distributed environment. """
     os.environ['MASTER_ADDR'] = '127.0.0.1'
-    os.environ['MASTER_PORT'] = '6027'
+    os.environ['MASTER_PORT'] = '6030'
 
     dist.init_process_group(backend='nccl', init_method='env://', rank=rank, world_size=world_size)
     model = build_detector(cfg.get('model'))
