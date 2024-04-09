@@ -10,6 +10,8 @@ from models.utils.rpn_utils import BboxOverlaps2D
 from functools import partial
 import numpy as np
 import pickle as pkl
+# from repvit_sam import SamPredictor, sam_model_registry
+from PIL import Image
 
 # visualization tool
 # import cv2
@@ -53,7 +55,13 @@ class ZidRCNN(TwoStageDetector):
         self.neg_rpn = neg_rpn
         self.mode = mode
         self.D = D
-
+        # sam_checkpoint = "repvit_sam.pt"
+        # model_type = "repvit"
+        
+        # self.rpn_sam_model = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+        # for param in self.rpn_sam_model.parameters():
+        #     param.requires_grad = False
+            
         self.init_weights(pretrained=pretrained)
 
     @property
@@ -106,6 +114,49 @@ class ZidRCNN(TwoStageDetector):
             supp_feats.append({'support_feat': supp_feat, 'support_bbox': boxes_p1})
         return supp_feats
 
+    # def rpn_sam(self, img_metas):
+    #     filepath = img_metas['filename']
+    #     # scale_factor = img_metas['scale_factor']
+    #     image = Image.open(filepath)
+    #     w, h = image.size
+
+    #     xvalues = np.linspace(0, w, 25, dtype='int')
+    #     yvalues = np.linspace(0, h, 25, dtype='int')
+    #     xx, yy = np.meshgrid(xvalues, yvalues)
+    #     positions = np.column_stack([xx.ravel(), yy.ravel()]).astype(int)
+
+    #     predictor = SamPredictor(self.rpn_sam_model)
+    #     nd_image = np.array(image)
+    #     predictor.set_image(nd_image)
+    #     point_label = np.array([1])
+    #     prompt_points = np.expand_dims(positions, 1)
+    
+    #     proposals = []
+    #     for point in prompt_points:
+    #         masks, scores, logits = predictor.predict(
+    #             point_coords=point,
+    #             point_labels=point_label,
+    #             multimask_output=False,
+    #         )
+    #         proposals.append(masks[0])
+    #     bounding_boxes = torch.zeros((len(proposals), 4), dtype=torch.float)
+    #     for index, mask in enumerate(proposals):
+    #         mask = torch.Tensor(mask)
+    #         h, w = mask.shape
+    #         if (mask==0).all():
+    #             bounding_boxes[index, 0] = w//2 - 2
+    #             bounding_boxes[index, 1] = h//2 - 2
+    #             bounding_boxes[index, 2] = w//2 + 2
+    #             bounding_boxes[index, 3] = h//2 + 2
+    #         else:
+    #             y, x = torch.where(mask != 0)
+    #             bounding_boxes[index, 0] = torch.min(x)
+    #             bounding_boxes[index, 1] = torch.min(y)
+    #             bounding_boxes[index, 2] = torch.max(x)
+    #             bounding_boxes[index, 3] = torch.max(y)
+    #     # bounding_boxes *= scale_factor
+    #     return bounding_boxes
+    
     def forward(self, img=None, img_metas=None, return_loss=True, **kwargs):
         """Calls either :func:`forward_train` or :func:`forward_test` depending
         on whether ``return_loss`` is ``True``.
@@ -171,6 +222,7 @@ class ZidRCNN(TwoStageDetector):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
+        
             
         B = img.shape[0]
         x = self.extract_feat(img)
@@ -189,33 +241,40 @@ class ZidRCNN(TwoStageDetector):
         p1_2D = {'feat': ref_rgb, 'box': boxes_p1, 'mask': mask, 'traj': traj}
         
         losses = dict()
+        # print("PROPOSAL BY SAM [START]")
+        proposal_list = proposals
+        # for img_meta in img_metas:
+        #     proposal = self.rpn_sam(img_meta).to(img.device)
+        #     proposal_list.append(proposal)
+        # print("PROPOSAL BY SAM [DONE]")    
         # RPN forward and loss
-        if self.with_rpn:
-            proposal_cfg = self.train_cfg.get('rpn_proposal',
-                                              self.test_cfg['rpn'])
-            # RPN only learn forground instance box
-            # if not self.neg_rpn:
-                # rpn_bboxes = [gt_box[0:1] for gt_box in gt_bboxes]
-            # else:
-            rpn_bboxes = gt_bboxes
-            rpn_losses, proposal_list = self.rpn_head.forward_train(
-                x,
-                img_metas,
-                rpn_bboxes,
-                gt_labels=None,
-                gt_bboxes_ignore=gt_bboxes_ignore,
-                proposal_cfg=proposal_cfg)
-            losses.update(rpn_losses)
-        else:
-            proposal_list = proposals
+        # if self.with_rpn:
+        #     proposal_cfg = self.train_cfg.get('rpn_proposal',
+        #                                       self.test_cfg['rpn'])
+        #     # RPN only learn forground instance box
+        #     # if not self.neg_rpn:
+        #         # rpn_bboxes = [gt_box[0:1] for gt_box in gt_bboxes]
+        #     # else:
+        #     rpn_bboxes = gt_bboxes
+        #     rpn_losses, proposal_list = self.rpn_head.forward_train(
+        #         x,
+        #         img_metas,
+        #         rpn_bboxes,
+        #         gt_labels=None,
+        #         gt_bboxes_ignore=gt_bboxes_ignore,
+        #         proposal_cfg=proposal_cfg)
+        #     losses.update(rpn_losses)
+        # else:
+        #     proposal_list = proposals
         # for proposal in proposal_list:
         #     # print("Proposal list: ", proposal.shape)
+        # print("ROI [START]")
         roi_losses = self.roi_head.forward_train(x, img_metas, proposal_list,
                                                  gt_bboxes, gt_labels, query_pose,
                                                  gt_bboxes_ignore, gt_masks, p1_2D, supp_feats, gt_categories,
                                                  **kwargs)
         losses.update(roi_losses)
-        
+        # print("ROI [DONE]")
         return losses
 
     def forward_train_recon(self,

@@ -957,6 +957,10 @@ class Resize(object):
                 bboxes[:, 1::2] = np.clip(bboxes[:, 1::2], 0, img_shape[0])
             results[key] = bboxes
 
+    def _resize_proposals(self, results):
+        proposals = results['proposals'] * results['scale_factor']
+        results['proposals'] = proposals
+        
     def _resize_masks(self, results):
         """Resize masks with ``results['scale']``"""
         for key in results.get('mask_fields', []):
@@ -1016,6 +1020,8 @@ class Resize(object):
                 self._random_scale(results)
 
         self._resize_img(results)
+        if 'proposals' in results.keys():
+            self._resize_proposals(results)
         self._resize_bboxes(results)
         self._resize_masks(results)
         self._resize_seg(results)

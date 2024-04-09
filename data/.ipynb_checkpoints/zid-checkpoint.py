@@ -28,6 +28,7 @@ class ZidDataset(CustomDataset):
                  p1_path,
                  img_scale=-1,
                  ins_scale=-1,
+                 seed=9999,
                  **kwargs):
         # We convert all category IDs into 1 for the class-agnostic training and
         # evaluation. We train on train_class and evaluate on eval_class split.
@@ -39,6 +40,7 @@ class ZidDataset(CustomDataset):
         self.obj_ids = list(self.all_obj_dict.values())
         self.class_names_dict = ['ins_{:06d}'.format(i) for i in self.obj_ids]
         self.img_scale = img_scale
+        self.seed = seed
         self.ins_scale = ins_scale
         self.D = 4
         super(ZidDataset, self).__init__(**kwargs)
@@ -82,6 +84,7 @@ class ZidDataset(CustomDataset):
                 local_info['obj_id'] = ann['category_id']
                 assert local_info['obj_id'] in self.obj_ids, 'Anno_{} has object that do not have P1 video'.format(ann['id'])
                 data_infos.append(local_info)
+        np.random.seed(self.seed)
         np.random.shuffle(data_infos)
         data_infos = data_infos[:self.ins_scale]
         print('Dataset scale (before filtering):\n Images:' + str(len(self.img_ids)) + '\n Instances:' +
@@ -142,7 +145,11 @@ class ZidDataset(CustomDataset):
         """
         img_info = self.data_infos[idx]
         ann_info = self.get_ann_info(idx)
+        img_id = img_info['file_name'].split('/')[1].split('.')[0]
         results = dict(img_info=img_info, ann_info=ann_info)
+        proposals = np.load(f'/home/minhnh/project_drive/CV/FewshotObjectDetection/data/OWID//P2/proposals/{img_id}.npy')
+        results['proposals'] = torch.from_numpy(proposals.astype(np.float32))
+
         if self.proposals is not None:
             results['proposals'] = self.proposals[idx]
         self.pre_pipeline(results)
