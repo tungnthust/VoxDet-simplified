@@ -43,7 +43,7 @@ ROBO_CLASSES = ('1', '2', '3', '4', '5',
             '6', '7', '8', '9', '10', '11', '12',
             '13', '14', '15', '16', '17', '18', '19',
             '20')
-MAX_DET = 1
+MAX_DET = 100
 
 class BopDataset(CustomDataset):
 
@@ -137,7 +137,7 @@ class BopDataset(CustomDataset):
             results['proposals'] = self.proposals[idx]
         self.pre_pipeline(results)
         data = self.pipeline(results)
-        p1_data = np.load(os.path.join(self.p1_path, 'obj_{:06d}'.format(img_info['category_id']), 'info.npz'))
+        p1_data = np.load(os.path.join(self.p1_path, 'obj_{:06d}'.format(img_info['category_id']), 'info224.npz'))
         data['rgb'] = torch.from_numpy(p1_data['rgb'].astype(np.float32))
         data['mask'] = torch.from_numpy(p1_data['mask'].astype(np.float32))
         # data['point'] = torch.from_numpy(p1_data['point'].astype(np.float32))
